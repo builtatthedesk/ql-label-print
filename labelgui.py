@@ -216,6 +216,10 @@ class LabelApp:
         self.qr = tk.BooleanVar(value=bool(self.cfg["qr"]))
         ttk.Checkbutton(opts, text="QR code", variable=self.qr,
                         command=self._on_qr_toggle).grid(row=0, column=0, padx=(0, 12))
+        # Not remembered: a shelf label is the exception, not the habit.
+        self.location = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opts, text="Shelf label", variable=self.location,
+                        command=self._render_preview).grid(row=0, column=2, padx=(12, 0))
         self.cap_words = tk.BooleanVar(value=True)
         ttk.Checkbutton(opts, text="Capitalize Words", variable=self.cap_words,
                         command=self._render_preview).grid(row=0, column=1)
@@ -299,15 +303,18 @@ class LabelApp:
         self.render_job = self.root.after(DEBOUNCE_MS, self._render_preview)
 
     def _render(self, text: str, length_px: int | None = None,
-                qr: bool | None = None, serial: str | None = None) -> Image.Image:
-        if qr is None:          # the print worker passes it; Tk vars are UI-thread only
+                qr: bool | None = None, serial: str | None = None,
+                location: bool | None = None) -> Image.Image:
+        if qr is None:          # the print worker passes these; Tk vars are UI-thread only
             qr = self.qr.get()
+            location = self.location.get()
             # The preview shows the next ID without using it up.
-            if qr and self.cfg["qr_serial"]:
+            if qr and self.cfg["qr_serial"] and not location:
                 serial = lp.next_ids(1)[0]
         return lp.render_text(text, self.lab, self.min_len, self.cfg["font"],
                               margin=self.margin, length_px=length_px, landscape=self.landscape,
-                              qr=qr, qr_date=bool(self.cfg["qr_date"]), qr_serial=serial)
+                              qr=qr, qr_date=bool(self.cfg["qr_date"]), qr_serial=serial,
+                              location=bool(location))
 
     @property
     def endless(self) -> bool:
@@ -319,7 +326,7 @@ class LabelApp:
             return None
         if self.auto_length.get():
             px = self._auto_length_px(text or self._current_text())
-            if self.qr.get() and self.landscape:
+            if (self.qr.get() or self.location.get()) and self.landscape:
                 # Along the roll the QR can grow as tall as the roll is wide;
                 # give it up to that much extra length so the words keep their size.
                 px = min(self.max_len, px + self.lab.dots_printable[0])
@@ -474,16 +481,19 @@ class LabelApp:
         # hand the worker a plain number.
         threading.Thread(target=self._print_worker,
                          args=(text, copies, self.verify.get(),
-                               self._length_px(text), self.qr.get()),
+                               self._length_px(text), self.qr.get(),
+                               self.location.get()),
                          daemon=True).start()
 
     def _print_worker(self, text: str, copies: int, verify: bool,
-                      length_px: int | None = None, qr: bool = False) -> None:
+                      length_px: int | None = None, qr: bool = False,
+                      location: bool = False) -> None:
         """Render, rasterise and send. Runs off the UI thread."""
         try:
             # With IDs every copy is a different label; otherwise one image.
-            ids = lp.next_ids(copies) if qr and self.cfg["qr_serial"] else []
-            imgs = [self._render(text, length_px, qr, serial)
+            ids = (lp.next_ids(copies)
+                   if qr and self.cfg["qr_serial"] and not location else [])
+            imgs = [self._render(text, length_px, qr, serial, location)
                     for serial in (ids or [None])]
             if self.landscape:
                 imgs = [im.rotate(-90, expand=True) for im in imgs]

@@ -71,6 +71,7 @@ Useful flags:
 - `--qr` / `--no-qr`: add a QR code of the label's text (see below)
 - `--qr-date` / `--no-qr-date`: include the print date in the QR code (default on)
 - `--qr-serial` / `--no-qr-serial`: give each label a unique ID in its QR code (default on)
+- `--location`: a shelf/place label (QR holds `LOC: <text>` only)
 - `--copies`, `--no-cut`, `--rotate`, `--font`, `--margin`
 
 On a die-cut roll an image is fitted inside the label (aspect ratio kept) and
@@ -114,6 +115,11 @@ first, then the ID; the words always stay. If the ID doesn't fit, no IDs are
 used up and you're told so. If `serial.json` is damaged the tool refuses rather
 than restart at `-001` and repeat today's IDs: fix it or delete it. A lock file
 stops the window and a scheduled job from handing out the same ID at once.
+
+**Shelf labels.** `--location` (or **Shelf label** in the window) makes a
+label for a place, e.g. `"Freezer A / Shelf 2"`. Its QR holds only
+`LOC: Freezer A / Shelf 2`, with no date or ID, so a reprint scans exactly the
+same. A scanning app can treat it as "everything scanned next is here".
 
 **The QR choice is remembered.** Ticking or unticking the box saves `"qr"` in
 `config.json`, and the command line uses the same setting (override with

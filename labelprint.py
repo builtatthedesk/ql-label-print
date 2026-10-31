@@ -204,6 +204,7 @@ QR_DATE_PREFIX = "Printed: "
 
 
 QR_SERIAL_PREFIX = "ID: "
+QR_LOCATION_PREFIX = "LOC: "   # a place label: scan it, then the items there
 
 
 def qr_payload(text: str, with_date: bool = True, serial: str | None = None) -> str:
@@ -340,7 +341,8 @@ def render_qr(text: str, side: int) -> Image.Image:
 def render_text(text: str, lab, min_length: int, font_path: str,
                 margin: int = 12, length_px: int | None = None,
                 landscape: bool = False, qr: bool = False,
-                qr_date: bool = True, qr_serial: str | None = None) -> Image.Image:
+                qr_date: bool = True, qr_serial: str | None = None,
+                location: bool = False) -> Image.Image:
     """Render text onto a white label-sized canvas.
 
     Die-cut labels have a fixed printable box. Endless labels have a fixed
@@ -353,8 +355,11 @@ def render_text(text: str, lab, min_length: int, font_path: str,
     qr=True puts a QR code of the exact text at the left end, as tall as the
     label, and fits the words into what is left. qr_date adds the print date
     and qr_serial a label ID to the code (see qr_payload); the printed words
-    are unchanged.
+    are unchanged. location=True makes a place label instead: a QR holding only
+    "LOC: <text>" -- no date, no ID -- so a reprint scans the same.
     """
+    if location:
+        qr, qr_date, qr_serial = True, False, None
     width, height = lab.dots_printable
     if height == 0:  # endless roll
         if length_px is None and qr and landscape:
@@ -379,7 +384,9 @@ def render_text(text: str, lab, min_length: int, font_path: str,
         tries = [t for i, t in enumerate(tries) if t not in tries[:i]]
         for n, (with_date, serial) in enumerate(tries):
             try:
-                code = render_qr(qr_payload(text, with_date, serial), side)
+                payload = (QR_LOCATION_PREFIX + text if location
+                           else qr_payload(text, with_date, serial))
+                code = render_qr(payload, side)
                 break
             except ValueError:
                 if n == len(tries) - 1:
@@ -753,6 +760,10 @@ def build_parser() -> argparse.ArgumentParser:
                             default=cfg["qr_date"],
                             help="put the print date in the QR code as a last "
                                  "line (QR only, not printed as words)")
+        common.add_argument("--location", action="store_true",
+                            help="text labels only: a shelf/place label whose QR holds only 'LOC: <text>' "
+                                 "(no date, no ID) so items scanned after it are "
+                                 "recorded there")
         common.add_argument("--qr-serial", action=argparse.BooleanOptionalAction,
                             default=cfg["qr_serial"],
                             help="give every label a unique ID (date + count, "
@@ -855,7 +866,7 @@ def main() -> int:
     if args.cmd == "text":
         text = args.text.replace("\\n", "\n")
         try:
-            if args.qr and args.qr_serial:
+            if args.qr and args.qr_serial and not args.location:
                 ids = next_ids(copies)
         except IdCounterError as exc:
             raise SystemExit(f"refusing to print: {exc}")
@@ -863,7 +874,8 @@ def main() -> int:
             # With IDs every copy is a different label; otherwise one image.
             imgs = [render_text(text, lab, min_len, args.font, margin=args.margin,
                                 length_px=args.length, landscape=landscape, qr=args.qr,
-                                qr_date=args.qr_date, qr_serial=serial)
+                                qr_date=args.qr_date, qr_serial=serial,
+                                location=args.location)
                     for serial in (ids or [None])]
         except ValueError as exc:
             raise SystemExit(f"refusing to print: {exc}")
