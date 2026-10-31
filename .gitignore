@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+
+# Brother installers pulled down once -- 123 MB, not source
+downloads/
+
+# Local state
+gui-history.json
+config.json.bak
+*.log
+out.bin
+
+# Your printer's settings and local build output -- never published
+config.json
+btspp.exe
+*.png
+label.bin
