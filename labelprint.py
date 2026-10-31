@@ -205,6 +205,7 @@ QR_DATE_PREFIX = "Printed: "
 
 QR_SERIAL_PREFIX = "ID: "
 QR_LOCATION_PREFIX = "LOC: "   # a place label: scan it, then the items there
+QR_COMMAND_PREFIX = "CMD: "    # a command label, e.g. "CMD: TAKE OUT" for a scan page
 
 
 def qr_payload(text: str, with_date: bool = True, serial: str | None = None) -> str:
@@ -342,7 +343,7 @@ def render_text(text: str, lab, min_length: int, font_path: str,
                 margin: int = 12, length_px: int | None = None,
                 landscape: bool = False, qr: bool = False,
                 qr_date: bool = True, qr_serial: str | None = None,
-                location: bool = False) -> Image.Image:
+                location: bool = False, command: bool = False) -> Image.Image:
     """Render text onto a white label-sized canvas.
 
     Die-cut labels have a fixed printable box. Endless labels have a fixed
@@ -356,9 +357,12 @@ def render_text(text: str, lab, min_length: int, font_path: str,
     label, and fits the words into what is left. qr_date adds the print date
     and qr_serial a label ID to the code (see qr_payload); the printed words
     are unchanged. location=True makes a place label instead: a QR holding only
-    "LOC: <text>" -- no date, no ID -- so a reprint scans the same.
+    "LOC: <text>" -- no date, no ID -- so a reprint scans the same. command=True
+    is the same with "CMD: <text>", for labels that tell a scan page what to do.
     """
-    if location:
+    prefix = (QR_LOCATION_PREFIX if location
+              else QR_COMMAND_PREFIX if command else None)
+    if prefix:
         qr, qr_date, qr_serial = True, False, None
     width, height = lab.dots_printable
     if height == 0:  # endless roll
@@ -384,7 +388,7 @@ def render_text(text: str, lab, min_length: int, font_path: str,
         tries = [t for i, t in enumerate(tries) if t not in tries[:i]]
         for n, (with_date, serial) in enumerate(tries):
             try:
-                payload = (QR_LOCATION_PREFIX + text if location
+                payload = (prefix + text if prefix
                            else qr_payload(text, with_date, serial))
                 code = render_qr(payload, side)
                 break
@@ -764,6 +768,9 @@ def build_parser() -> argparse.ArgumentParser:
                             help="text labels only: a shelf/place label whose QR holds only 'LOC: <text>' "
                                  "(no date, no ID) so items scanned after it are "
                                  "recorded there")
+        common.add_argument("--command", action="store_true",
+                            help="text labels only: a command label whose QR holds only "
+                                 "'CMD: <text>' (no date, no ID), e.g. \"TAKE OUT\"")
         common.add_argument("--qr-serial", action=argparse.BooleanOptionalAction,
                             default=cfg["qr_serial"],
                             help="give every label a unique ID (date + count, "
@@ -866,7 +873,9 @@ def main() -> int:
     if args.cmd == "text":
         text = args.text.replace("\\n", "\n")
         try:
-            if args.qr and args.qr_serial and not args.location:
+            if args.location and args.command:
+                raise SystemExit("--location and --command are different labels; pick one")
+            if args.qr and args.qr_serial and not (args.location or args.command):
                 ids = next_ids(copies)
         except IdCounterError as exc:
             raise SystemExit(f"refusing to print: {exc}")
@@ -875,7 +884,7 @@ def main() -> int:
             imgs = [render_text(text, lab, min_len, args.font, margin=args.margin,
                                 length_px=args.length, landscape=landscape, qr=args.qr,
                                 qr_date=args.qr_date, qr_serial=serial,
-                                location=args.location)
+                                location=args.location, command=args.command)
                     for serial in (ids or [None])]
         except ValueError as exc:
             raise SystemExit(f"refusing to print: {exc}")
