@@ -28,7 +28,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from brother_ql.conversion import convert
 from brother_ql.labels import ALL_LABELS, LabelsManager
 from brother_ql.models import ALL_MODELS
@@ -305,29 +305,55 @@ def render_text(text: str, lab, min_length: int, font_path: str,
     return canvas.convert("RGB")
 
 
-def load_image(path: str, lab, landscape: bool = False) -> Image.Image:
+def open_image(path: str) -> Image.Image:
+    """Open an image upright (EXIF), with transparency flattened onto white."""
+    with Image.open(path) as im:
+        img = ImageOps.exif_transpose(im)
+        img.load()
+    if img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info:
+        img = img.convert("RGBA")
+        img = Image.alpha_composite(Image.new("RGBA", img.size, "white"), img)
+    return img.convert("RGB")
+
+
+def load_image(img: Image.Image, lab, min_length: int,
+               landscape: bool = False, rotate: int = 0) -> Image.Image:
     """Scale an image onto the label.
 
-    Endless rolls: scaled to the roll width; the label is as long as it needs.
+    Endless rolls: scaled to the roll width (or, landscape, so its height is
+    the roll width) and padded to the head's minimum length if short.
     Die-cut rolls: the head wants exactly the printable size, so the image is
     fitted inside it (aspect kept) and centred on white. With landscape the
     canvas is the label as you read it, long edge across, like render_text.
+    rotate (90/270) is applied later by brother_ql, so the canvas is built
+    pre-rotation: swapped once more.
     """
-    img = Image.open(path).convert("RGB")
     width, height = lab.dots_printable
+    swap = landscape != (rotate in (90, 270))
+
     if height == 0:  # endless roll
-        if img.width != width:
+        if swap:
+            ratio = width / img.height
+            img = img.resize((max(1, int(img.width * ratio)), width), Image.LANCZOS)
+            if img.width < min_length:
+                img = ImageOps.pad(img, (min_length, width), color="white")
+        else:
             ratio = width / img.width
             img = img.resize((width, max(1, int(img.height * ratio))), Image.LANCZOS)
+            if img.height < min_length:
+                img = ImageOps.pad(img, (width, min_length), color="white")
         return img
 
-    if landscape:
+    if swap:
         width, height = height, width
     ratio = min(width / img.width, height / img.height)
     img = img.resize((max(1, int(img.width * ratio)), max(1, int(img.height * ratio))),
                      Image.LANCZOS)
     canvas = Image.new("RGB", (width, height), "white")
-    canvas.paste(img, ((width - img.width) // 2, (height - img.height) // 2))
+    y = (height - img.height) // 2
+    if not swap:  # same calibration nudge render_text gives text
+        y = max(0, min(height - img.height, y + TEXT_SHIFT_Y.get(lab.identifier, 0)))
+    canvas.paste(img, ((width - img.width) // 2, y))
     return canvas
 
 
@@ -604,7 +630,8 @@ def build_parser() -> argparse.ArgumentParser:
         common.add_argument("--rotate", default="auto", choices=["auto", "0", "90", "270"])
         orient = common.add_mutually_exclusive_group()
         orient.add_argument("--landscape", dest="landscape", action="store_true", default=None,
-                            help="text along the long edge (default for die-cut rolls)")
+                            help="along the long edge (default for text on long die-cut "
+                                 "rolls, and for wide images on them)")
         orient.add_argument("--portrait", dest="landscape", action="store_false",
                             help="text across the short edge")
         common.add_argument("--preview", metavar="PNG", help="also save the rendered bitmap here")
@@ -717,12 +744,13 @@ def main() -> int:
         except ValueError as exc:
             raise SystemExit(f"refusing to print: {exc}")
     else:
+        source = open_image(args.path)
         if args.landscape is None:
             # Auto: a wide image goes along a long die-cut label.
-            with Image.open(args.path) as probe:
-                landscape = (lab.form_factor == 1 and ph > pw
-                             and probe.width > probe.height)
-        img = load_image(args.path, lab, landscape)
+            landscape = (lab.form_factor == 1 and ph > pw
+                         and source.width > source.height)
+        rotate = 0 if args.rotate == "auto" else int(args.rotate)
+        img = load_image(source, lab, min_len, landscape, rotate)
 
     # Preview the label as it reads in the hand, before rotating for the head.
     if args.preview:
