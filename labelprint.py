@@ -231,15 +231,78 @@ def qr_payload(text: str, with_date: bool = True, serial: str | None = None,
     return "\n".join(lines)
 
 
+_MONTHS = {m: i for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun",
+     "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+
+
 def parse_date(value: str) -> datetime.date:
-    """A YYYY-MM-DD date for the QR, no later than today."""
+    """A date for the QR, written however it comes out, no later than today.
+
+    US month-first: 1-16-26, 1/16/2026, 01.16.26, 011626, Jan 16 26,
+    16 January 2026, 2026-01-16, 20260116. No year means the last time that
+    day came round (1/16 typed in October is this January; 12/25 typed in
+    October is last Christmas). Two-digit years are 20xx. "today" and
+    "yesterday" work too.
+    """
+    raw = value.strip().lower()
+    today = datetime.date.today()
+    if raw in ("today", "t"):
+        return today
+    if raw in ("yesterday", "y"):
+        return today - datetime.timedelta(days=1)
+
+    parts = re.findall(r"[a-z]+|\d+", raw)
+    month = None
+    nums: list[str] = []
+    for part in parts:
+        if part.isdigit():
+            nums.append(part)
+        elif part[:3] in _MONTHS and month is None:
+            month = _MONTHS[part[:3]]
+        elif part not in ("st", "nd", "rd", "th", "of"):
+            month = -1          # a word we don't know: give up below
+            break
+
+    y = m = d = None
+    if month == -1:
+        pass
+    elif month is not None:                     # Jan 16 26 / 16 January 2026
+        if len(nums) in (1, 2):
+            d = int(nums[0])
+            y = int(nums[1]) if len(nums) == 2 else None
+            m = month
+    elif len(nums) == 1 and len(nums[0]) in (6, 8):   # 011626 / 20260116
+        n = nums[0]
+        if len(n) == 8 and n[:2] in ("19", "20"):
+            y, m, d = int(n[:4]), int(n[4:6]), int(n[6:])
+        else:
+            m, d, y = int(n[:2]), int(n[2:4]), int(n[4:])
+    elif len(nums) == 3 and len(nums[0]) == 4:  # 2026-01-16
+        y, m, d = (int(n) for n in nums)
+    elif len(nums) in (2, 3):                   # 1-16-26 / 1/16
+        m, d = int(nums[0]), int(nums[1])
+        y = int(nums[2]) if len(nums) == 3 else None
+        if m > 12 >= d:                         # 16/1/26: can only be day-first
+            m, d = d, m
+
+    if y is not None and y < 100:
+        y += 2000
     try:
-        d = datetime.date.fromisoformat(value.strip())
+        if m is None or d is None:
+            raise ValueError
+        if y is None:
+            dt = datetime.date(today.year, m, d)
+            if dt > today:
+                dt = datetime.date(today.year - 1, m, d)
+        else:
+            dt = datetime.date(y, m, d)
     except ValueError:
-        raise argparse.ArgumentTypeError(f"{value!r} is not a YYYY-MM-DD date")
-    if d > datetime.date.today():
-        raise argparse.ArgumentTypeError(f"{d} is in the future")
-    return d
+        raise argparse.ArgumentTypeError(
+            f"can't read {value.strip()!r} as a date (try 1-16-26)")
+    if dt > today:
+        raise argparse.ArgumentTypeError(f"{dt:%b %d, %Y} is in the future")
+    return dt
 
 
 class IdCounterError(RuntimeError):
@@ -781,9 +844,9 @@ def build_parser() -> argparse.ArgumentParser:
                             default=cfg["qr_date"],
                             help="put the print date in the QR code as a last "
                                  "line (QR only, not printed as words)")
-        common.add_argument("--date", type=parse_date, default=None, metavar="YYYY-MM-DD",
+        common.add_argument("--date", type=parse_date, default=None, metavar="DATE",
                             help="put this date in the QR instead of today's, e.g. "
-                                 "when the item was bought (implies --qr-date; the "
+                                 "when the item was bought: 1-16-26, Jan 16, 2026-01-16 (implies --qr-date; the "
                                  "label ID still uses today)")
         common.add_argument("--location", action="store_true",
                             help="text labels only: a shelf/place label whose QR holds only 'LOC: <text>' "

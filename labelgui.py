@@ -231,7 +231,10 @@ class LabelApp:
         self.qr_date_var = tk.StringVar(value="")
         date_box = ttk.Entry(opts, textvariable=self.qr_date_var, width=11)
         date_box.grid(row=0, column=4)
-        date_box.bind("<KeyRelease>", self._schedule_render)
+        date_box.bind("<KeyRelease>", self._on_date_typed)
+        # Echoes what the box was read as, so 1-16-26 visibly means Jan 16.
+        self.date_seen = ttk.Label(opts, text="", width=13, foreground="#666")
+        self.date_seen.grid(row=0, column=5, padx=(4, 0))
 
         self.canvas = tk.Canvas(frm, height=230, background="#e9e9e9",
                                 highlightthickness=1,
@@ -310,6 +313,16 @@ class LabelApp:
         if self.render_job:
             self.root.after_cancel(self.render_job)
         self.render_job = self.root.after(DEBOUNCE_MS, self._render_preview)
+
+    def _on_date_typed(self, _event=None) -> None:
+        try:
+            d = self._qr_date()
+            self.date_seen.configure(text="today" if d is None
+                                     else d.strftime("= %b %d, %Y"),
+                                     foreground="#666")
+        except ValueError:
+            self.date_seen.configure(text="? not a date", foreground="#b00")
+        self._schedule_render()
 
     def _qr_date(self):
         """The date box as a date, None when blank. Raises ValueError if bad."""

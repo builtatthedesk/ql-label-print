@@ -70,7 +70,7 @@ Useful flags:
 - `--no-verify`: skip the pre-flight media check
 - `--qr` / `--no-qr`: add a QR code of the label's text (see below)
 - `--qr-date` / `--no-qr-date`: include the print date in the QR code (default on)
-- `--date YYYY-MM-DD`: use this date in the QR instead of today's (backdating old stock)
+- `--date DATE`: use this date (1-16-26, 1/16, Jan 16 2026, 2026-01-16...) in the QR instead of today's (backdating old stock)
 - `--qr-serial` / `--no-qr-serial`: give each label a unique ID in its QR code (default on)
 - `--location`: a shelf/place label (QR holds `LOC: <text>` only)
 - `--command`: a command label (QR holds `CMD: <text>` only)
@@ -106,7 +106,10 @@ word or two) the date is dropped and the QR keeps just the text.
 
 **Backdating.** Labelling something you've had for a while? `--date 2025-03-04`
 (or the **Date** box in the GUI; blank = today) puts that date on the
-`Printed:` line instead. Future dates are refused. The label ID still uses
+`Printed:` line instead. Write it however: `1-16-26`, `1/16/2026`, `011626`,
+`Jan 16 26`, `1/16` (no year = the most recent one), `yesterday`. Month comes
+first, US style; the GUI shows what it read next to the box. Future dates are
+refused. The label ID still uses
 today's date — it's a print counter, and a backdated ID could repeat one
 already printed that day. The GUI's Date box is not remembered between launches.
 
