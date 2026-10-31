@@ -18,14 +18,15 @@ scripts can print a label unattended.
 
 Developed and tested on Windows 10 with a QL-1110NWB. The Python parts should
 run elsewhere; the Bluetooth helper, spooler transport and shortcut script are
-Windows-only.
+Windows-only. Off Windows, set `font` in `config.json` to a TTF that exists
+(the default is Arial Bold from `C:/Windows/Fonts`).
 
 ## Setup
 
 ```bash
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install brother-ql-next pillow pyserial pyusb
-copy config.example.json config.json
+cp config.example.json config.json   # PowerShell: Copy-Item
 ```
 
 Edit `config.json` for your printer (see [Transports](#transports)). With no
@@ -54,6 +55,7 @@ C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe /out:btspp.exe btspp.cs
 media       : 29 mm die-cut labels, 90 mm long
 label id    : 29x90
 errors      : none  (0x00 0x00)
+...
 ```
 
 Useful flags:
@@ -135,7 +137,7 @@ over Bluetooth:
 
 ## Things learned the hard way
 
-- **There's no "QL-1100NWB".** Resellers use the name, but the real models are
+- **There's no "QL-1100NWB".** Resellers (and brother-ql-next's model list) use the name, but the real models are
   the **QL-1100** (USB only) and the **QL-1110NWB** (USB, Ethernet, Wi-Fi,
   Bluetooth). Check the sticker before choosing a transport.
 - **Don't bother pairing over Bluetooth.** On our unit, Windows pairing always

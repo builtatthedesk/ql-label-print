@@ -68,8 +68,8 @@ if (-not $usb) {
     Write-Output '  (no Brother device on the USB bus)'
 } else {
     foreach ($d in $usb) {
-        $pid = if ($d.InstanceId -match 'PID_([0-9A-Fa-f]{4})') { $Matches[1] } else { '????' }
-        Write-Output "  *** $($d.FriendlyName)  [$($d.Status)]  -->  --transport usb://0x04f9:0x$pid"
+        $productId = if ($d.InstanceId -match 'PID_([0-9A-Fa-f]{4})') { $Matches[1] } else { '????' }
+        Write-Output "  *** $($d.FriendlyName)  [$($d.Status)]  -->  --transport usb://0x04f9:0x$productId"
     }
     Write-Output '  note: the pyusb backend needs a WinUSB/libusb driver bound to the device.'
 }

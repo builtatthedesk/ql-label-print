@@ -61,7 +61,7 @@ class StatusUnavailable(Exception):
 def load_config() -> dict:
     cfg = dict(DEFAULTS)
     if CONFIG_PATH.exists():
-        cfg.update(json.loads(CONFIG_PATH.read_text(encoding="utf-8")))
+        cfg.update(json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig")))
     apply_calibration(cfg.get("calibration", {}))
     return cfg
 
@@ -110,7 +110,7 @@ def new_raster(model_id: str, lab, force_length: bool = False) -> BrotherQLRaste
 
     brother_ql gives every QL-1100-series head a 301-dot (~25.5 mm) minimum.
     That holds for endless rolls (they are padded up to it) but not for die-cut
-    ones: a DK-1221 23x23 (202 dots) printed fine on 2026-10-06. Die-cut labels
+    ones: a DK-1221 23x23 (202 dots) printed fine in testing. Die-cut labels
     have a fixed size, so the floor is relaxed for them on a copy of the model.
     """
     qlr = BrotherQLRaster(model_id)
@@ -297,7 +297,7 @@ def query_status(transport: str) -> bytes:
         if re.fullmatch(r"(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}", target):
             helper = HERE / "btspp.exe"
             if not helper.exists():
-                raise SystemExit(f"{helper} missing; build it from btspp.cs")
+                raise StatusUnavailable(f"{helper} missing; build it from btspp.cs")
             tmp = Path(tempfile.gettempdir()) / "labelprint-status.bin"
             tmp.unlink(missing_ok=True)
             proc = subprocess.run([str(helper), "status", target, str(tmp)],
@@ -311,10 +311,13 @@ def query_status(transport: str) -> bytes:
                 tmp.unlink(missing_ok=True)
 
         import serial
-        with serial.Serial(target, baudrate=115200, timeout=15, write_timeout=30) as ser:
-            ser.write(STATUS_REQUEST)
-            ser.flush()
-            return ser.read(32)
+        try:
+            with serial.Serial(target, baudrate=115200, timeout=15, write_timeout=30) as ser:
+                ser.write(STATUS_REQUEST)
+                ser.flush()
+                return ser.read(32)
+        except serial.SerialException as exc:
+            raise StatusUnavailable(f"cannot reach {target}: {exc}")
 
     raise SystemExit(f"status is not supported over {scheme}://")
 

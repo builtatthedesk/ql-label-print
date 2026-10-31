@@ -145,9 +145,9 @@ class LabelApp:
                          "loaded".format(chosen))
 
     def _save_label(self, identifier: str) -> None:
-        """Write the roll back to config.json so the CLI and skill agree."""
+        """Write the roll back to config.json so the CLI agrees."""
         try:
-            raw = json.loads(lp.CONFIG_PATH.read_text(encoding="utf-8"))
+            raw = json.loads(lp.CONFIG_PATH.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             raw = {}
         raw["label"] = identifier
@@ -175,7 +175,7 @@ class LabelApp:
         ttk.Label(head, text=self.cfg["model"],
                   foreground="#666").grid(row=0, column=1, sticky="e", padx=(0, 10))
 
-        # Changing this writes config.json, so the CLI and the agent skill
+        # Changing this writes config.json, so the CLI
         # follow the roll too. Nothing here can ask the printer what is really
         # loaded -- that needs the Bluetooth status channel.
         ttk.Label(head, text="Roll").grid(row=0, column=2, padx=(0, 4))
@@ -247,9 +247,8 @@ class LabelApp:
         self.length_mm.trace_add("write", self._on_length_typed)
         self._sync_length_state()
 
-        # The media check only answers over Bluetooth, which has been timing
-        # out since 2026-08-31, so every attempt costs ~20 s and then prints
-        # unguarded anyway. Off by default; still here for when BT comes back.
+        # The media check only answers over Bluetooth, which can take ~20 s
+        # and is often unavailable. Off by default; tick it when BT status works.
         self.verify = tk.BooleanVar(value=False)
         ttk.Checkbutton(ctl, text="Check roll first (slow)",
                         variable=self.verify).grid(row=0, column=6, padx=12)

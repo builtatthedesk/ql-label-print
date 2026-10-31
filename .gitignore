@@ -16,3 +16,4 @@ config.json
 btspp.exe
 *.png
 label.bin
+!site/*.png

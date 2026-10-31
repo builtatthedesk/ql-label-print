@@ -118,7 +118,7 @@ static class Bt
     {
         if (args.Length < 2)
         {
-            Console.Error.WriteLine("usage: btspp.exe <probe|send|scan> <MAC> [file]");
+            Console.Error.WriteLine("usage: btspp.exe <probe|send|status|scan> <MAC> [file]");
             return 2;
         }
 
