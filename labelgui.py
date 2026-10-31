@@ -309,8 +309,8 @@ class LabelApp:
         if self.auto_length.get():
             px = self._auto_length_px(text or self._current_text())
             if self.qr.get() and self.landscape:
-                # Along the roll the QR is a square as tall as the roll is wide;
-                # give it that much extra length so the words keep their size.
+                # Along the roll the QR can grow as tall as the roll is wide;
+                # give it up to that much extra length so the words keep their size.
                 px = min(self.max_len, px + self.lab.dots_printable[0])
             return px
         try:
@@ -425,8 +425,13 @@ class LabelApp:
         try:
             img = self._render(text, length_px)
         except Exception as exc:                       # bad font, odd glyph...
+            self.canvas.delete("all")                  # never show a stale label
             self._set_status("preview failed: {}".format(exc), "err")
+            self.preview_failed = True
             return
+        if getattr(self, "preview_failed", False):
+            self._set_status("")
+            self.preview_failed = False
 
         scale = min(PREVIEW_W / img.width, 210 / img.height)
         shown = img.resize((max(1, int(img.width * scale)),

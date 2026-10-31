@@ -88,8 +88,8 @@ words are fitted into the space beside it.
 The code is drawn as large as the label allows, and each square must be at
 least 4 dots (about 0.34 mm) so phones can read it. If the text is too long for
 that on the loaded roll, the tool refuses rather than printing a code nobody can
-scan: shorten the text or use a wider roll. On very small rolls (23x23) only a few
-characters fit.
+scan: shorten the text or use a wider roll. On very small rolls (23x23) only about a
+dozen characters fit, and 12 mm rolls can't take a QR code at all.
 
 ### Pre-flight media check
 

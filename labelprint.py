@@ -200,6 +200,11 @@ def render_qr(text: str, side: int) -> Image.Image:
     under QR_MIN_DOTS -- an unscannable code is worse than none.
     """
     import segno
+    if not text:
+        raise ValueError("a QR code needs some text")
+    if side // (21 + 2 * QR_QUIET) < QR_MIN_DOTS:   # 21 = the smallest QR
+        raise ValueError(f"this label is too small for a readable QR code "
+                         f"({side} dots)")
     qr = segno.make(text, error="m", micro=False)
     modules = qr.symbol_size(border=QR_QUIET)[0]
     scale = side // modules
@@ -230,6 +235,9 @@ def render_text(text: str, lab, min_length: int, font_path: str,
     """
     width, height = lab.dots_printable
     if height == 0:  # endless roll
+        if length_px is None and qr and landscape:
+            # Along the roll, leave room for a QR as tall as the roll is wide.
+            length_px = width + width // 3
         height = max(length_px or width // 3, min_length)
     if landscape:
         width, height = height, width
@@ -240,7 +248,10 @@ def render_text(text: str, lab, min_length: int, font_path: str,
     left = 0
     if qr:
         code = render_qr(text, min(height, width // 2))
-        canvas.paste(code, (0, (height - code.height) // 2))
+        qy = (height - code.height) // 2
+        if not landscape:  # same calibration nudge the text gets below
+            qy = max(0, min(height - code.height, qy + TEXT_SHIFT_Y.get(lab.identifier, 0)))
+        canvas.paste(code, (0, qy))
         left = code.width
         width -= left
 
