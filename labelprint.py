@@ -18,6 +18,7 @@ Transports:
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -207,7 +208,6 @@ def qr_payload(text: str, with_date: bool = True) -> str:
     """
     if not with_date:
         return text
-    import datetime
     return f"{text}\n{QR_DATE_PREFIX}{datetime.date.today().isoformat()}"
 
 
@@ -269,7 +269,17 @@ def render_text(text: str, lab, min_length: int, font_path: str,
     if qr:
         if not text:
             raise ValueError("a QR code needs some text")
-        code = render_qr(qr_payload(text, qr_date), min(height, width // 2))
+        side = min(height, width // 2)
+        try:
+            code = render_qr(qr_payload(text, qr_date), side)
+        except ValueError:
+            if not qr_date:
+                raise
+            # The date costs ~19 characters of QR room; on a small roll the
+            # words matter more, so drop the date rather than the code.
+            code = render_qr(text, side)
+            print("note: print date left out of the QR code -- no room on "
+                  "this roll", file=sys.stderr)
         qy = (height - code.height) // 2
         if not landscape:  # same calibration nudge the text gets below
             qy = max(0, min(height - code.height, qy + TEXT_SHIFT_Y.get(lab.identifier, 0)))
@@ -554,47 +564,56 @@ def build_parser() -> argparse.ArgumentParser:
 
     # Shared options live on a parent parser so they work on either side of
     # the subcommand -- `text "hi" --label 62` reads better than forcing every
-    # flag ahead of the verb.
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--model", default=cfg["model"])
-    common.add_argument("--label", default=cfg["label"],
-                        help="DK size id, e.g. 62, 62x29, 102x152")
-    common.add_argument("--transport", default=cfg["transport"])
-    common.add_argument("--status-transport", default=cfg.get("status_transport"),
-                        help="bidirectional transport used for status queries when "
-                             "the printing transport cannot answer them")
-    common.add_argument("--font", default=cfg["font"])
-    common.add_argument("--margin", type=int, default=cfg.get("margin", 12),
-                        help="blank dots kept between the text and the printable "
-                             "edge (default from config.json, else 12)")
-    common.add_argument("--length", type=int, default=None,
-                        help="endless-roll label length in dots (300dpi: ~11.8 dots/mm)")
-    common.add_argument("--copies", type=int, default=1)
-    common.add_argument("--no-cut", action="store_true")
-    common.add_argument("--rotate", default="auto", choices=["auto", "0", "90", "270"])
-    orient = common.add_mutually_exclusive_group()
-    orient.add_argument("--landscape", dest="landscape", action="store_true", default=None,
-                        help="text along the long edge (default for die-cut rolls)")
-    orient.add_argument("--portrait", dest="landscape", action="store_false",
-                        help="text across the short edge")
-    common.add_argument("--preview", metavar="PNG", help="also save the rendered bitmap here")
-    common.add_argument("--qr", action=argparse.BooleanOptionalAction,
-                        default=cfg["qr"],
-                        help="add a QR code that encodes the label text "
-                             "(default from config.json)")
-    common.add_argument("--qr-date", action=argparse.BooleanOptionalAction,
-                        default=cfg["qr_date"],
-                        help="put the print date in the QR code as a last "
-                             "line (QR only, not printed as words)")
-    common.add_argument("--dry-run", action="store_true",
-                        help="build the raster but write it to a file instead of "
-                             "printing; the transport is still used for --label auto")
-    common.add_argument("--no-verify", action="store_true",
-                        help="skip the pre-flight media check (saves a round trip, "
-                             "risks a rejected job and a wasted label)")
-    common.add_argument("--force-length", action="store_true",
-                        help="ignore the model's minimum label length (the 301-dot "
-                             "floor comes from brother_ql, not from testing this printer)")
+    # flag ahead of the verb. The subcommands get a copy with every default
+    # suppressed: argparse copies a subparser's defaults over the top-level
+    # values, which would silently undo `--no-qr text hi`.
+    def make_common() -> argparse.ArgumentParser:
+        common = argparse.ArgumentParser(add_help=False)
+        common.add_argument("--model", default=cfg["model"])
+        common.add_argument("--label", default=cfg["label"],
+                            help="DK size id, e.g. 62, 62x29, 102x152")
+        common.add_argument("--transport", default=cfg["transport"])
+        common.add_argument("--status-transport", default=cfg.get("status_transport"),
+                            help="bidirectional transport used for status queries when "
+                                 "the printing transport cannot answer them")
+        common.add_argument("--font", default=cfg["font"])
+        common.add_argument("--margin", type=int, default=cfg.get("margin", 12),
+                            help="blank dots kept between the text and the printable "
+                                 "edge (default from config.json, else 12)")
+        common.add_argument("--length", type=int, default=None,
+                            help="endless-roll label length in dots (300dpi: ~11.8 dots/mm)")
+        common.add_argument("--copies", type=int, default=1)
+        common.add_argument("--no-cut", action="store_true")
+        common.add_argument("--rotate", default="auto", choices=["auto", "0", "90", "270"])
+        orient = common.add_mutually_exclusive_group()
+        orient.add_argument("--landscape", dest="landscape", action="store_true", default=None,
+                            help="text along the long edge (default for die-cut rolls)")
+        orient.add_argument("--portrait", dest="landscape", action="store_false",
+                            help="text across the short edge")
+        common.add_argument("--preview", metavar="PNG", help="also save the rendered bitmap here")
+        common.add_argument("--qr", action=argparse.BooleanOptionalAction,
+                            default=cfg["qr"],
+                            help="add a QR code that encodes the label text "
+                                 "(default from config.json)")
+        common.add_argument("--qr-date", action=argparse.BooleanOptionalAction,
+                            default=cfg["qr_date"],
+                            help="put the print date in the QR code as a last "
+                                 "line (QR only, not printed as words)")
+        common.add_argument("--dry-run", action="store_true",
+                            help="build the raster but write it to a file instead of "
+                                 "printing; the transport is still used for --label auto")
+        common.add_argument("--no-verify", action="store_true",
+                            help="skip the pre-flight media check (saves a round trip, "
+                                 "risks a rejected job and a wasted label)")
+        common.add_argument("--force-length", action="store_true",
+                            help="ignore the model's minimum label length (the 301-dot "
+                                 "floor comes from brother_ql, not from testing this printer)")
+        return common
+
+    common = make_common()
+    sub_common = make_common()
+    for action in sub_common._actions:
+        action.default = argparse.SUPPRESS
 
     p = argparse.ArgumentParser(description=__doc__, parents=[common],
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -602,11 +621,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--list-models", action="store_true")
 
     sub = p.add_subparsers(dest="cmd")
-    t = sub.add_parser("text", parents=[common], help="print a text label")
+    t = sub.add_parser("text", parents=[sub_common], help="print a text label")
     t.add_argument("text", help=r"label text; use \n for multiple lines")
-    i = sub.add_parser("image", parents=[common], help="print an image file")
+    i = sub.add_parser("image", parents=[sub_common], help="print an image file")
     i.add_argument("path")
-    sub.add_parser("status", parents=[common],
+    sub.add_parser("status", parents=[sub_common],
                    help="ask the printer what roll is loaded and whether it is happy")
     return p
 

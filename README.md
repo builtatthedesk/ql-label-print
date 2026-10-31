@@ -69,7 +69,7 @@ Useful flags:
 - `--landscape` / `--portrait`: override the orientation default
 - `--no-verify`: skip the pre-flight media check
 - `--qr` / `--no-qr`: add a QR code of the label's text (see below)
-- `--no-qr-date`: leave the print date out of the QR code
+- `--qr-date` / `--no-qr-date`: include the print date in the QR code (default on)
 - `--copies`, `--no-cut`, `--rotate`, `--font`, `--margin`
 
 ### Text is auto-fitted
@@ -91,7 +91,9 @@ one more line, `Printed: 2026-10-30`, which is not printed on the label. So
 anything you label gets dated even if you never write a date on it: scan it
 later and you know when it was made. It's always the last line and always in
 that format, so a scanner app can split it off. Turn it off with `--no-qr-date`
-or `"qr_date": false` in `config.json`.
+or `"qr_date": false` in `config.json`. The date takes about 19 characters of
+room in the code, so on a roll too small for both (e.g. 23x23 with more than a
+word or two) the date is dropped and the QR keeps just the text.
 
 **The QR choice is remembered.** Ticking or unticking the box saves `"qr"` in
 `config.json`, and the command line uses the same setting (override with
