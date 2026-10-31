@@ -203,10 +203,14 @@ class LabelApp:
                   foreground="#888").grid(row=2, column=0, sticky="w")
 
         # Applied to the preview and the print, never to the box you type in.
+        opts = ttk.Frame(frm)
+        opts.grid(row=2, column=0, sticky="e")
+        self.qr = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opts, text="QR code", variable=self.qr,
+                        command=self._render_preview).grid(row=0, column=0, padx=(0, 12))
         self.cap_words = tk.BooleanVar(value=True)
-        ttk.Checkbutton(frm, text="Capitalize Words", variable=self.cap_words,
-                        command=self._render_preview).grid(
-                            row=2, column=0, sticky="e")
+        ttk.Checkbutton(opts, text="Capitalize Words", variable=self.cap_words,
+                        command=self._render_preview).grid(row=0, column=1)
 
         self.canvas = tk.Canvas(frm, height=230, background="#e9e9e9",
                                 highlightthickness=1,
@@ -286,9 +290,13 @@ class LabelApp:
             self.root.after_cancel(self.render_job)
         self.render_job = self.root.after(DEBOUNCE_MS, self._render_preview)
 
-    def _render(self, text: str, length_px: int | None = None) -> Image.Image:
+    def _render(self, text: str, length_px: int | None = None,
+                qr: bool | None = None) -> Image.Image:
+        if qr is None:          # the print worker passes it; Tk vars are UI-thread only
+            qr = self.qr.get()
         return lp.render_text(text, self.lab, self.min_len, self.cfg["font"],
-                              margin=self.margin, length_px=length_px, landscape=self.landscape)
+                              margin=self.margin, length_px=length_px, landscape=self.landscape,
+                              qr=qr)
 
     @property
     def endless(self) -> bool:
@@ -299,7 +307,12 @@ class LabelApp:
         if not self.endless:
             return None
         if self.auto_length.get():
-            return self._auto_length_px(text or self._current_text())
+            px = self._auto_length_px(text or self._current_text())
+            if self.qr.get() and self.landscape:
+                # Along the roll the QR is a square as tall as the roll is wide;
+                # give it that much extra length so the words keep their size.
+                px = min(self.max_len, px + self.lab.dots_printable[0])
+            return px
         try:
             mm = float(self.length_mm.get())
         except ValueError:
@@ -445,14 +458,14 @@ class LabelApp:
         # hand the worker a plain number.
         threading.Thread(target=self._print_worker,
                          args=(text, copies, self.verify.get(),
-                               self._length_px(text)),
+                               self._length_px(text), self.qr.get()),
                          daemon=True).start()
 
     def _print_worker(self, text: str, copies: int, verify: bool,
-                      length_px: int | None = None) -> None:
+                      length_px: int | None = None, qr: bool = False) -> None:
         """Render, rasterise and send. Runs off the UI thread."""
         try:
-            img = self._render(text, length_px)
+            img = self._render(text, length_px, qr)
             if self.landscape:
                 img = img.rotate(-90, expand=True)
             floor = self.min_len if self.endless else 1

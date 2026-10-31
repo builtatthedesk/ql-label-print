@@ -25,7 +25,7 @@ Windows-only. Off Windows, set `font` in `config.json` to a TTF that exists
 
 ```bash
 python -m venv .venv
-.venv/Scripts/python.exe -m pip install brother-ql-next pillow pyserial pyusb
+.venv/Scripts/python.exe -m pip install brother-ql-next pillow pyserial pyusb segno
 cp config.example.json config.json   # PowerShell: Copy-Item
 ```
 
@@ -68,6 +68,7 @@ Useful flags:
 - `--length`: length in dots for endless rolls (300 dpi is about 11.8 dots/mm)
 - `--landscape` / `--portrait`: override the orientation default
 - `--no-verify`: skip the pre-flight media check
+- `--qr`: add a QR code that encodes the label's text (see below)
 - `--copies`, `--no-cut`, `--rotate`, `--font`, `--margin`
 
 ### Text is auto-fitted
@@ -76,6 +77,19 @@ The tool searches for the largest font at which the text still fits, re-wrapping
 at each size. Short text prints big; long text wraps rather than shrinking.
 `\n` is always a hard break. **Don't pre-wrap**: forcing short lines makes the
 font smaller.
+
+### QR code of the text
+
+`--qr` (or the **QR code** box in the window) puts a square QR code at the left
+end of the label that encodes exactly the words printed on it, line breaks
+included. Scan it with a phone camera and you get the label's text back. The
+words are fitted into the space beside it.
+
+The code is drawn as large as the label allows, and each square must be at
+least 4 dots (about 0.34 mm) so phones can read it. If the text is too long for
+that on the loaded roll, the tool refuses rather than printing a code nobody can
+scan: shorten the text or use a wider roll. On very small rolls (23x23) only a few
+characters fit.
 
 ### Pre-flight media check
 
@@ -173,7 +187,7 @@ The printer protocol handling comes from
 [`brother-ql-next`](https://github.com/LunarEclipse363/brother_ql_next), a fork
 of [`brother_ql`](https://github.com/pklaus/brother_ql) by Philipp Klaus, used
 under the GPL-3.0. No Brother software, firmware or documentation is included in
-this repository. Other dependencies (Pillow, pySerial, PyUSB) are installed
+this repository. Other dependencies (Pillow, pySerial, PyUSB, segno) are installed
 separately under their own licenses.
 
 No warranty. This sends raw commands to hardware. Use at your own risk.
