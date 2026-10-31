@@ -305,13 +305,30 @@ def render_text(text: str, lab, min_length: int, font_path: str,
     return canvas.convert("RGB")
 
 
-def load_image(path: str, lab) -> Image.Image:
-    img = Image.open(path)
-    width, _ = lab.dots_printable
-    if img.width != width:
-        ratio = width / img.width
-        img = img.resize((width, max(1, int(img.height * ratio))), Image.LANCZOS)
-    return img.convert("RGB")
+def load_image(path: str, lab, landscape: bool = False) -> Image.Image:
+    """Scale an image onto the label.
+
+    Endless rolls: scaled to the roll width; the label is as long as it needs.
+    Die-cut rolls: the head wants exactly the printable size, so the image is
+    fitted inside it (aspect kept) and centred on white. With landscape the
+    canvas is the label as you read it, long edge across, like render_text.
+    """
+    img = Image.open(path).convert("RGB")
+    width, height = lab.dots_printable
+    if height == 0:  # endless roll
+        if img.width != width:
+            ratio = width / img.width
+            img = img.resize((width, max(1, int(img.height * ratio))), Image.LANCZOS)
+        return img
+
+    if landscape:
+        width, height = height, width
+    ratio = min(width / img.width, height / img.height)
+    img = img.resize((max(1, int(img.width * ratio)), max(1, int(img.height * ratio))),
+                     Image.LANCZOS)
+    canvas = Image.new("RGB", (width, height), "white")
+    canvas.paste(img, ((width - img.width) // 2, (height - img.height) // 2))
+    return canvas
 
 
 # --------------------------------------------------------------------------
@@ -700,8 +717,12 @@ def main() -> int:
         except ValueError as exc:
             raise SystemExit(f"refusing to print: {exc}")
     else:
-        img = load_image(args.path, lab)
-        landscape = False
+        if args.landscape is None:
+            # Auto: a wide image goes along a long die-cut label.
+            with Image.open(args.path) as probe:
+                landscape = (lab.form_factor == 1 and ph > pw
+                             and probe.width > probe.height)
+        img = load_image(args.path, lab, landscape)
 
     # Preview the label as it reads in the hand, before rotating for the head.
     if args.preview:
