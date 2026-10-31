@@ -14,6 +14,7 @@ install-shortcut.ps1 puts a Desktop shortcut on that command.
 
 from __future__ import annotations
 
+import argparse
 import json
 import queue
 import re
@@ -223,6 +224,14 @@ class LabelApp:
         self.cap_words = tk.BooleanVar(value=True)
         ttk.Checkbutton(opts, text="Capitalize Words", variable=self.cap_words,
                         command=self._render_preview).grid(row=0, column=1)
+        # Backdates the QR's "Printed:" line, for labelling old stock with the
+        # day it was bought. Blank = today. Not remembered: a stale backdate
+        # on tomorrow's labels would be wrong without anyone noticing.
+        ttk.Label(opts, text="Date").grid(row=0, column=3, padx=(12, 4))
+        self.qr_date_var = tk.StringVar(value="")
+        date_box = ttk.Entry(opts, textvariable=self.qr_date_var, width=11)
+        date_box.grid(row=0, column=4)
+        date_box.bind("<KeyRelease>", self._schedule_render)
 
         self.canvas = tk.Canvas(frm, height=230, background="#e9e9e9",
                                 highlightthickness=1,
@@ -302,19 +311,30 @@ class LabelApp:
             self.root.after_cancel(self.render_job)
         self.render_job = self.root.after(DEBOUNCE_MS, self._render_preview)
 
+    def _qr_date(self):
+        """The date box as a date, None when blank. Raises ValueError if bad."""
+        value = self.qr_date_var.get().strip()
+        if not value:
+            return None
+        try:
+            return lp.parse_date(value)
+        except argparse.ArgumentTypeError as exc:
+            raise ValueError("date: {}".format(exc))
+
     def _render(self, text: str, length_px: int | None = None,
                 qr: bool | None = None, serial: str | None = None,
-                location: bool | None = None) -> Image.Image:
+                location: bool | None = None, date=None) -> Image.Image:
         if qr is None:          # the print worker passes these; Tk vars are UI-thread only
             qr = self.qr.get()
             location = self.location.get()
+            date = self._qr_date()
             # The preview shows the next ID without using it up.
             if qr and self.cfg["qr_serial"] and not location:
                 serial = lp.next_ids(1)[0]
         return lp.render_text(text, self.lab, self.min_len, self.cfg["font"],
                               margin=self.margin, length_px=length_px, landscape=self.landscape,
-                              qr=qr, qr_date=bool(self.cfg["qr_date"]), qr_serial=serial,
-                              location=bool(location))
+                              qr=qr, qr_date=bool(self.cfg["qr_date"]) or date is not None,
+                              qr_serial=serial, location=bool(location), date=date)
 
     @property
     def endless(self) -> bool:
@@ -473,6 +493,11 @@ class LabelApp:
             copies = max(1, int(self.copies.get()))
         except (tk.TclError, ValueError):
             copies = 1
+        try:
+            date = self._qr_date()
+        except ValueError as exc:
+            self._set_status(str(exc), "err")
+            return
         self.printing = True
         self.print_btn.configure(state="disabled")
         self._set_status("checking the roll..." if self.verify.get()
@@ -482,18 +507,18 @@ class LabelApp:
         threading.Thread(target=self._print_worker,
                          args=(text, copies, self.verify.get(),
                                self._length_px(text), self.qr.get(),
-                               self.location.get()),
+                               self.location.get(), date),
                          daemon=True).start()
 
     def _print_worker(self, text: str, copies: int, verify: bool,
                       length_px: int | None = None, qr: bool = False,
-                      location: bool = False) -> None:
+                      location: bool = False, date=None) -> None:
         """Render, rasterise and send. Runs off the UI thread."""
         try:
             # With IDs every copy is a different label; otherwise one image.
             ids = (lp.next_ids(copies)
                    if qr and self.cfg["qr_serial"] and not location else [])
-            imgs = [self._render(text, length_px, qr, serial, location)
+            imgs = [self._render(text, length_px, qr, serial, location, date)
                     for serial in (ids or [None])]
             if self.landscape:
                 imgs = [im.rotate(-90, expand=True) for im in imgs]

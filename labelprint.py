@@ -208,7 +208,8 @@ QR_LOCATION_PREFIX = "LOC: "   # a place label: scan it, then the items there
 QR_COMMAND_PREFIX = "CMD: "    # a command label, e.g. "CMD: TAKE OUT" for a scan page
 
 
-def qr_payload(text: str, with_date: bool = True, serial: str | None = None) -> str:
+def qr_payload(text: str, with_date: bool = True, serial: str | None = None,
+               date: datetime.date | None = None) -> str:
     """What the QR holds: the label text, then (optionally) the print date
     and the label's unique ID.
 
@@ -217,13 +218,28 @@ def qr_payload(text: str, with_date: bool = True, serial: str | None = None) -> 
     still scan as five different items. They always come last, in this order,
     as "Printed: YYYY-MM-DD" and "ID: 261030-001", so a scanner can split them
     off.
+
+    date backdates the "Printed:" line -- labelling old stock with the day it
+    was bought, not today. The ID keeps today's date: it is a print counter,
+    and backdating it could repeat an ID already printed on that day.
     """
     lines = [text]
     if with_date:
-        lines.append(f"{QR_DATE_PREFIX}{datetime.date.today().isoformat()}")
+        lines.append(f"{QR_DATE_PREFIX}{(date or datetime.date.today()).isoformat()}")
     if serial is not None:
         lines.append(f"{QR_SERIAL_PREFIX}{serial}")
     return "\n".join(lines)
+
+
+def parse_date(value: str) -> datetime.date:
+    """A YYYY-MM-DD date for the QR, no later than today."""
+    try:
+        d = datetime.date.fromisoformat(value.strip())
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a YYYY-MM-DD date")
+    if d > datetime.date.today():
+        raise argparse.ArgumentTypeError(f"{d} is in the future")
+    return d
 
 
 class IdCounterError(RuntimeError):
@@ -343,7 +359,8 @@ def render_text(text: str, lab, min_length: int, font_path: str,
                 margin: int = 12, length_px: int | None = None,
                 landscape: bool = False, qr: bool = False,
                 qr_date: bool = True, qr_serial: str | None = None,
-                location: bool = False, command: bool = False) -> Image.Image:
+                location: bool = False, command: bool = False,
+                date: datetime.date | None = None) -> Image.Image:
     """Render text onto a white label-sized canvas.
 
     Die-cut labels have a fixed printable box. Endless labels have a fixed
@@ -355,7 +372,7 @@ def render_text(text: str, lab, min_length: int, font_path: str,
 
     qr=True puts a QR code of the exact text at the left end, as tall as the
     label, and fits the words into what is left. qr_date adds the print date
-    and qr_serial a label ID to the code (see qr_payload); the printed words
+    (or date, if given) and qr_serial a label ID to the code (see qr_payload); the printed words
     are unchanged. location=True makes a place label instead: a QR holding only
     "LOC: <text>" -- no date, no ID -- so a reprint scans the same. command=True
     is the same with "CMD: <text>", for labels that tell a scan page what to do.
@@ -389,7 +406,7 @@ def render_text(text: str, lab, min_length: int, font_path: str,
         for n, (with_date, serial) in enumerate(tries):
             try:
                 payload = (prefix + text if prefix
-                           else qr_payload(text, with_date, serial))
+                           else qr_payload(text, with_date, serial, date))
                 code = render_qr(payload, side)
                 break
             except ValueError:
@@ -764,6 +781,10 @@ def build_parser() -> argparse.ArgumentParser:
                             default=cfg["qr_date"],
                             help="put the print date in the QR code as a last "
                                  "line (QR only, not printed as words)")
+        common.add_argument("--date", type=parse_date, default=None, metavar="YYYY-MM-DD",
+                            help="put this date in the QR instead of today's, e.g. "
+                                 "when the item was bought (implies --qr-date; the "
+                                 "label ID still uses today)")
         common.add_argument("--location", action="store_true",
                             help="text labels only: a shelf/place label whose QR holds only 'LOC: <text>' "
                                  "(no date, no ID) so items scanned after it are "
@@ -883,8 +904,9 @@ def main() -> int:
             # With IDs every copy is a different label; otherwise one image.
             imgs = [render_text(text, lab, min_len, args.font, margin=args.margin,
                                 length_px=args.length, landscape=landscape, qr=args.qr,
-                                qr_date=args.qr_date, qr_serial=serial,
-                                location=args.location, command=args.command)
+                                qr_date=args.qr_date or args.date is not None,
+                                qr_serial=serial, location=args.location,
+                                command=args.command, date=args.date)
                     for serial in (ids or [None])]
         except ValueError as exc:
             raise SystemExit(f"refusing to print: {exc}")
