@@ -7,6 +7,8 @@ downloads/
 
 # Local state
 gui-history.json
+serial.json
+serial.tmp
 config.json.bak
 *.log
 out.bin

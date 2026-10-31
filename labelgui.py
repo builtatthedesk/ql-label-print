@@ -299,12 +299,15 @@ class LabelApp:
         self.render_job = self.root.after(DEBOUNCE_MS, self._render_preview)
 
     def _render(self, text: str, length_px: int | None = None,
-                qr: bool | None = None) -> Image.Image:
+                qr: bool | None = None, serial: str | None = None) -> Image.Image:
         if qr is None:          # the print worker passes it; Tk vars are UI-thread only
             qr = self.qr.get()
+            # The preview shows the next ID without using it up.
+            if qr and self.cfg["qr_serial"]:
+                serial = lp.next_ids(1)[0]
         return lp.render_text(text, self.lab, self.min_len, self.cfg["font"],
                               margin=self.margin, length_px=length_px, landscape=self.landscape,
-                              qr=qr, qr_date=bool(self.cfg["qr_date"]))
+                              qr=qr, qr_date=bool(self.cfg["qr_date"]), qr_serial=serial)
 
     @property
     def endless(self) -> bool:
@@ -478,9 +481,13 @@ class LabelApp:
                       length_px: int | None = None, qr: bool = False) -> None:
         """Render, rasterise and send. Runs off the UI thread."""
         try:
-            img = self._render(text, length_px, qr)
+            # With IDs every copy is a different label; otherwise one image.
+            ids = lp.next_ids(copies) if qr and self.cfg["qr_serial"] else []
+            imgs = [self._render(text, length_px, qr, serial)
+                    for serial in (ids or [None])]
             if self.landscape:
-                img = img.rotate(-90, expand=True)
+                imgs = [im.rotate(-90, expand=True) for im in imgs]
+            img = imgs[0]
             floor = self.min_len if self.endless else 1
             if not (floor <= img.height <= self.max_len):
                 raise RuntimeError(
@@ -491,7 +498,7 @@ class LabelApp:
             qlr = lp.new_raster(self.cfg["model"], self.lab)
             qlr.exception_on_warning = True
             data = bytes(lp.convert(
-                qlr=qlr, images=[img] * copies, label=self.cfg["label"],
+                qlr=qlr, images=imgs if ids else imgs * copies, label=self.cfg["label"],
                 rotate=0, threshold=70.0, dither=False, compress=True,
                 red=(self.cfg["label"] == "62red"), dpi_600=False, hq=True,
                 cut=True))
@@ -516,8 +523,15 @@ class LabelApp:
                             "printed".format(" or ".join(loaded),
                                              self.cfg["label"]))
 
+            if ids:
+                try:
+                    lp.take_ids(ids)
+                except SystemExit as exc:   # not an Exception; would kill the thread
+                    raise RuntimeError(str(exc))
             lp.send(data, self.cfg["transport"])
             plural = "" if copies == 1 else " x{}".format(copies)
+            if ids:
+                plural += "  ID " + ids[0] + (" .. " + ids[-1] if len(ids) > 1 else "")
             self.results.put(("ok", "printed" + plural + "  " + warning, text))
         except Exception as exc:
             detail = str(exc) or exc.__class__.__name__

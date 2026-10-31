@@ -36,6 +36,7 @@ from brother_ql.raster import BrotherQLRaster
 
 HERE = Path(__file__).resolve().parent
 CONFIG_PATH = HERE / "config.json"
+SERIAL_PATH = HERE / "serial.json"   # today's label-ID count; local, never published
 
 DEFAULTS = {
     "model": "QL-1110NWB",
@@ -50,6 +51,7 @@ DEFAULTS = {
     "cut": True,
     "qr": False,        # QR code of the text on every label
     "qr_date": True,    # ...with the print date as a last line, in the QR only
+    "qr_serial": True,  # ...and a unique ID per label (see next_ids)
 }
 
 
@@ -199,16 +201,65 @@ QR_QUIET = 2      # quiet-zone squares around the code; phones manage with 2
 QR_DATE_PREFIX = "Printed: "
 
 
-def qr_payload(text: str, with_date: bool = True) -> str:
-    """What the QR holds: the label text, then (optionally) the print date.
+QR_SERIAL_PREFIX = "ID: "
 
-    The date line goes in the code only, never on the label, so a label with
-    no date written on it still says when it was made. It is always the last
-    line and always "Printed: YYYY-MM-DD", so a scanner can split it off.
+
+def qr_payload(text: str, with_date: bool = True, serial: str | None = None) -> str:
+    """What the QR holds: the label text, then (optionally) the print date
+    and the label's unique ID.
+
+    These lines go in the code only, never on the label, so a label with no
+    date written on it still says when it was made, and five identical labels
+    still scan as five different items. They always come last, in this order,
+    as "Printed: YYYY-MM-DD" and "ID: 261030-001", so a scanner can split them
+    off.
     """
-    if not with_date:
-        return text
-    return f"{text}\n{QR_DATE_PREFIX}{datetime.date.today().isoformat()}"
+    lines = [text]
+    if with_date:
+        lines.append(f"{QR_DATE_PREFIX}{datetime.date.today().isoformat()}")
+    if serial is not None:
+        lines.append(f"{QR_SERIAL_PREFIX}{serial}")
+    return "\n".join(lines)
+
+
+def _serial_state() -> tuple[str, int]:
+    """(today as YYMMDD, the next count for today)."""
+    today = datetime.date.today().strftime("%y%m%d")
+    try:
+        state = json.loads(SERIAL_PATH.read_text(encoding="utf-8-sig"))
+        if state.get("day") == today:
+            return today, int(state["next"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return today, 1
+
+
+def next_ids(count: int) -> list[str]:
+    """The next label IDs, without using them up (previews and dry runs).
+
+    An ID is the print date plus that day's count -- 261030-001, 261030-002,
+    then 261031-001 tomorrow. Losing serial.json (a rebuilt PC) can only ever
+    repeat an ID printed earlier the same day, never one from another day.
+    """
+    day, n = _serial_state()
+    return [f"{day}-{n + k:03d}" for k in range(count)]
+
+
+def take_ids(ids: list[str]) -> None:
+    """Use up ids (from next_ids), just before the job is sent.
+
+    If the counter moved since they were handed out (another print in between,
+    or midnight) refuse, so two labels can never share an ID. Taking them before
+    sending means a failed send leaves a gap, never a duplicate.
+    """
+    if next_ids(len(ids)) != ids:
+        raise SystemExit("label ID counter changed while this job was being "
+                         "prepared (another print, or midnight); run it again")
+    day, _, last = ids[-1].partition("-")
+    tmp = SERIAL_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"day": day, "next": int(last) + 1}) + "\n",
+                   encoding="utf-8")
+    os.replace(tmp, SERIAL_PATH)
 
 
 def render_qr(text: str, side: int) -> Image.Image:
@@ -239,7 +290,7 @@ def render_qr(text: str, side: int) -> Image.Image:
 def render_text(text: str, lab, min_length: int, font_path: str,
                 margin: int = 12, length_px: int | None = None,
                 landscape: bool = False, qr: bool = False,
-                qr_date: bool = True) -> Image.Image:
+                qr_date: bool = True, qr_serial: str | None = None) -> Image.Image:
     """Render text onto a white label-sized canvas.
 
     Die-cut labels have a fixed printable box. Endless labels have a fixed
@@ -251,7 +302,8 @@ def render_text(text: str, lab, min_length: int, font_path: str,
 
     qr=True puts a QR code of the exact text at the left end, as tall as the
     label, and fits the words into what is left. qr_date adds the print date
-    to the code (see qr_payload); the printed words are unchanged.
+    and qr_serial a label ID to the code (see qr_payload); the printed words
+    are unchanged.
     """
     width, height = lab.dots_printable
     if height == 0:  # endless roll
@@ -270,16 +322,24 @@ def render_text(text: str, lab, min_length: int, font_path: str,
         if not text:
             raise ValueError("a QR code needs some text")
         side = min(height, width // 2)
-        try:
-            code = render_qr(qr_payload(text, qr_date), side)
-        except ValueError:
-            if not qr_date:
-                raise
-            # The date costs ~19 characters of QR room; on a small roll the
-            # words matter more, so drop the date rather than the code.
-            code = render_qr(text, side)
-            print("note: print date left out of the QR code -- no room on "
-                  "this roll", file=sys.stderr)
+        # On a small roll the extra lines may not fit. The words matter most,
+        # then the ID, then the date -- so drop them in that reverse order.
+        tries = [(qr_date, qr_serial), (False, qr_serial), (False, None)]
+        tries = [t for i, t in enumerate(tries) if t not in tries[:i]]
+        for n, (with_date, serial) in enumerate(tries):
+            try:
+                code = render_qr(qr_payload(text, with_date, serial), side)
+                break
+            except ValueError:
+                if n == len(tries) - 1:
+                    raise
+        dropped = [what for what, asked, got in
+                   (("print date", qr_date, with_date),
+                    ("label ID", qr_serial is not None, serial is not None))
+                   if asked and not got]
+        if dropped:
+            print(f"note: {' and '.join(dropped)} left out of the QR code -- "
+                  f"no room on this roll", file=sys.stderr)
         qy = (height - code.height) // 2
         if not landscape:  # same calibration nudge the text gets below
             qy = max(0, min(height - code.height, qy + TEXT_SHIFT_Y.get(lab.identifier, 0)))
@@ -643,6 +703,11 @@ def build_parser() -> argparse.ArgumentParser:
                             default=cfg["qr_date"],
                             help="put the print date in the QR code as a last "
                                  "line (QR only, not printed as words)")
+        common.add_argument("--qr-serial", action=argparse.BooleanOptionalAction,
+                            default=cfg["qr_serial"],
+                            help="give every label a unique ID (date + count, "
+                                 "e.g. 261030-001) in its QR code; --dry-run "
+                                 "shows the next ID without using it")
         common.add_argument("--dry-run", action="store_true",
                             help="build the raster but write it to a file instead of "
                                  "printing; the transport is still used for --label auto")
@@ -735,14 +800,21 @@ def main() -> int:
     if landscape is None:
         landscape = args.cmd == "text" and lab.form_factor == 1 and ph > pw
 
+    copies = max(1, args.copies)
+    ids: list[str] = []
     if args.cmd == "text":
         text = args.text.replace("\\n", "\n")
+        if args.qr and args.qr_serial:
+            ids = next_ids(copies)
         try:
-            img = render_text(text, lab, min_len, args.font, margin=args.margin,
-                              length_px=args.length, landscape=landscape, qr=args.qr,
-                              qr_date=args.qr_date)
+            # With IDs every copy is a different label; otherwise one image.
+            imgs = [render_text(text, lab, min_len, args.font, margin=args.margin,
+                                length_px=args.length, landscape=landscape, qr=args.qr,
+                                qr_date=args.qr_date, qr_serial=serial)
+                    for serial in (ids or [None])]
         except ValueError as exc:
             raise SystemExit(f"refusing to print: {exc}")
+        img = imgs[0]
     else:
         source = open_image(args.path)
         if args.landscape is None:
@@ -751,13 +823,15 @@ def main() -> int:
                          and source.width > source.height)
         rotate = 0 if args.rotate == "auto" else int(args.rotate)
         img = load_image(source, lab, min_len, landscape, rotate)
+        imgs = [img]
 
     # Preview the label as it reads in the hand, before rotating for the head.
     if args.preview:
         img.save(args.preview)
 
     if landscape:
-        img = img.rotate(-90, expand=True)
+        imgs = [im.rotate(-90, expand=True) for im in imgs]
+        img = imgs[0]
 
     # The 301-dot floor only binds endless rolls; die-cut rolls print at their
     # own size (see new_raster).
@@ -778,7 +852,7 @@ def main() -> int:
     qlr.exception_on_warning = True
     instructions = convert(
         qlr=qlr,
-        images=[img] * max(1, args.copies),
+        images=imgs if len(imgs) == copies else imgs * copies,
         label=args.label,
         rotate=rotate,
         threshold=70.0,
@@ -818,6 +892,13 @@ def main() -> int:
                       file=sys.stderr)
                 return 2
 
+    if ids:
+        span = ids[0] + (f" .. {ids[-1]}" if len(ids) > 1 else "")
+        if destination.startswith("file://"):
+            print(f"label ID {span} (dry run: not used up)")
+        else:
+            take_ids(ids)
+            print(f"label ID {span}")
     print(send(bytes(instructions), destination))
     return 0
 

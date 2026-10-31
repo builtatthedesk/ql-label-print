@@ -70,6 +70,7 @@ Useful flags:
 - `--no-verify`: skip the pre-flight media check
 - `--qr` / `--no-qr`: add a QR code of the label's text (see below)
 - `--qr-date` / `--no-qr-date`: include the print date in the QR code (default on)
+- `--qr-serial` / `--no-qr-serial`: give each label a unique ID in its QR code (default on)
 - `--copies`, `--no-cut`, `--rotate`, `--font`, `--margin`
 
 On a die-cut roll an image is fitted inside the label (aspect ratio kept) and
@@ -99,6 +100,17 @@ that format, so a scanner app can split it off. Turn it off with `--no-qr-date`
 or `"qr_date": false` in `config.json`. The date takes about 19 characters of
 room in the code, so on a roll too small for both (e.g. 23x23 with more than a
 word or two) the date is dropped and the QR keeps just the text.
+
+**Every label gets its own ID.** The QR's last line is `ID: 261030-001`: the
+print date (YYMMDD) and that day's count, so five "Lemons" labels scan as five
+different items. Each copy gets the next number, and tomorrow starts again at
+`-001`. The count lives in `serial.json` next to the tool. Because the date is
+part of the ID, losing that file (say, a rebuilt PC) can only ever repeat an ID
+printed earlier the same day. IDs are used up just before the job is sent, so a
+failed print leaves a gap, never a duplicate. The preview and `--dry-run` show
+the next ID without using it. Turn IDs off with `--no-qr-serial` or
+`"qr_serial": false`. On a roll too small for everything, the date is dropped
+first, then the ID; the words always stay.
 
 **The QR choice is remembered.** Ticking or unticking the box saves `"qr"` in
 `config.json`, and the command line uses the same setting (override with
