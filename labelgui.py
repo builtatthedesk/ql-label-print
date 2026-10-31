@@ -327,7 +327,7 @@ class LabelApp:
         if qr is None:          # the print worker passes these; Tk vars are UI-thread only
             qr = self.qr.get()
             location = self.location.get()
-            date = self._qr_date()
+            date = self._qr_date() if qr and not location else None
             # The preview shows the next ID without using it up.
             if qr and self.cfg["qr_serial"] and not location:
                 serial = lp.next_ids(1)[0]
@@ -494,7 +494,8 @@ class LabelApp:
         except (tk.TclError, ValueError):
             copies = 1
         try:
-            date = self._qr_date()
+            date = (self._qr_date() if self.qr.get() and not self.location.get()
+                    else None)
         except ValueError as exc:
             self._set_status(str(exc), "err")
             return
