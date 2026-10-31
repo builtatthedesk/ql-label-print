@@ -189,9 +189,38 @@ def fit_text(path: str, text: str, box: tuple[int, int]):
     return best
 
 
+QR_MIN_DOTS = 4   # smallest QR square, in dots (~0.34 mm at 300 dpi), we will print
+QR_QUIET = 2      # quiet-zone squares around the code; phones manage with 2
+
+
+def render_qr(text: str, side: int) -> Image.Image:
+    """A QR code encoding text, as large as fits in a side x side square.
+
+    Raises ValueError when the text needs so many squares that each would be
+    under QR_MIN_DOTS -- an unscannable code is worse than none.
+    """
+    import segno
+    if not text:
+        raise ValueError("a QR code needs some text")
+    if side // (21 + 2 * QR_QUIET) < QR_MIN_DOTS:   # 21 = the smallest QR
+        raise ValueError(f"this label is too small for a readable QR code "
+                         f"({side} dots)")
+    qr = segno.make(text, error="m", micro=False)
+    modules = qr.symbol_size(border=QR_QUIET)[0]
+    scale = side // modules
+    if scale < QR_MIN_DOTS:
+        raise ValueError(f"text too long for a readable QR code on this label "
+                         f"({modules} squares in {side} dots); shorten it or "
+                         f"use a wider roll")
+    rows = list(qr.matrix_iter(scale=scale, border=QR_QUIET))
+    img = Image.new("L", (len(rows[0]), len(rows)), 255)
+    img.putdata([0 if dark else 255 for row in rows for dark in row])
+    return img
+
+
 def render_text(text: str, lab, min_length: int, font_path: str,
                 margin: int = 12, length_px: int | None = None,
-                landscape: bool = False) -> Image.Image:
+                landscape: bool = False, qr: bool = False) -> Image.Image:
     """Render text onto a white label-sized canvas.
 
     Die-cut labels have a fixed printable box. Endless labels have a fixed
@@ -200,15 +229,31 @@ def render_text(text: str, lab, min_length: int, font_path: str,
     In landscape mode the canvas is built the way you hold the finished label --
     long edge horizontal -- and the caller rotates it before rasterising. That
     keeps the preview honest: what you see is the label in reading orientation.
+
+    qr=True puts a QR code of the exact text at the left end, as tall as the
+    label, and fits the words into what is left.
     """
     width, height = lab.dots_printable
     if height == 0:  # endless roll
+        if length_px is None and qr and landscape:
+            # Along the roll, leave room for a QR as tall as the roll is wide.
+            length_px = width + width // 3
         height = max(length_px or width // 3, min_length)
     if landscape:
         width, height = height, width
 
     canvas = Image.new("L", (width, height), 255)
     draw = ImageDraw.Draw(canvas)
+
+    left = 0
+    if qr:
+        code = render_qr(text, min(height, width // 2))
+        qy = (height - code.height) // 2
+        if not landscape:  # same calibration nudge the text gets below
+            qy = max(0, min(height - code.height, qy + TEXT_SHIFT_Y.get(lab.identifier, 0)))
+        canvas.paste(code, (0, qy))
+        left = code.width
+        width -= left
 
     box = (width - 2 * margin, height - 2 * margin)
     font, lines = fit_text(font_path, text, box)
@@ -221,7 +266,7 @@ def render_text(text: str, lab, min_length: int, font_path: str,
 
     for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font)
-        x = (width - (bbox[2] - bbox[0])) // 2 - bbox[0]
+        x = left + (width - (bbox[2] - bbox[0])) // 2 - bbox[0]
         draw.text((x, y), line, font=font, fill=0, anchor="la")
         y += step
 
@@ -511,6 +556,8 @@ def build_parser() -> argparse.ArgumentParser:
     orient.add_argument("--portrait", dest="landscape", action="store_false",
                         help="text across the short edge")
     common.add_argument("--preview", metavar="PNG", help="also save the rendered bitmap here")
+    common.add_argument("--qr", action="store_true",
+                        help="add a QR code that encodes the label text")
     common.add_argument("--dry-run", action="store_true",
                         help="build the raster but write it to a file instead of "
                              "printing; the transport is still used for --label auto")
@@ -599,8 +646,11 @@ def main() -> int:
 
     if args.cmd == "text":
         text = args.text.replace("\\n", "\n")
-        img = render_text(text, lab, min_len, args.font, margin=args.margin,
-                          length_px=args.length, landscape=landscape)
+        try:
+            img = render_text(text, lab, min_len, args.font, margin=args.margin,
+                              length_px=args.length, landscape=landscape, qr=args.qr)
+        except ValueError as exc:
+            raise SystemExit(f"refusing to print: {exc}")
     else:
         img = load_image(args.path, lab)
         landscape = False
