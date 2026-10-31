@@ -72,6 +72,7 @@ Useful flags:
 - `--qr-date` / `--no-qr-date`: include the print date in the QR code (default on)
 - `--qr-serial` / `--no-qr-serial`: give each label a unique ID in its QR code (default on)
 - `--location`: a shelf/place label (QR holds `LOC: <text>` only)
+- `--command`: a command label (QR holds `CMD: <text>` only)
 - `--copies`, `--no-cut`, `--rotate`, `--font`, `--margin`
 
 On a die-cut roll an image is fitted inside the label (aspect ratio kept) and
@@ -120,6 +121,10 @@ stops the window and a scheduled job from handing out the same ID at once.
 label for a place, e.g. `"Freezer A / Shelf 2"`. Its QR holds only
 `LOC: Freezer A / Shelf 2`, with no date or ID, so a reprint scans exactly the
 same. A scanning app can treat it as "everything scanned next is here".
+
+**Command labels.** `--command` is the same idea for actions: `text "TAKE OUT"
+--command` puts `CMD: TAKE OUT` in the QR. Stick it somewhere handy and a
+scanning app can switch modes when you scan it, with no screen to tap.
 
 **The QR choice is remembered.** Ticking or unticking the box saves `"qr"` in
 `config.json`, and the command line uses the same setting (override with
