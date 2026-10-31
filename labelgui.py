@@ -299,12 +299,15 @@ class LabelApp:
         self.render_job = self.root.after(DEBOUNCE_MS, self._render_preview)
 
     def _render(self, text: str, length_px: int | None = None,
-                qr: bool | None = None) -> Image.Image:
+                qr: bool | None = None, serial: str | None = None) -> Image.Image:
         if qr is None:          # the print worker passes it; Tk vars are UI-thread only
             qr = self.qr.get()
+            # The preview shows the next ID without using it up.
+            if qr and self.cfg["qr_serial"]:
+                serial = lp.next_ids(1)[0]
         return lp.render_text(text, self.lab, self.min_len, self.cfg["font"],
                               margin=self.margin, length_px=length_px, landscape=self.landscape,
-                              qr=qr, qr_date=bool(self.cfg["qr_date"]))
+                              qr=qr, qr_date=bool(self.cfg["qr_date"]), qr_serial=serial)
 
     @property
     def endless(self) -> bool:
@@ -478,9 +481,17 @@ class LabelApp:
                       length_px: int | None = None, qr: bool = False) -> None:
         """Render, rasterise and send. Runs off the UI thread."""
         try:
-            img = self._render(text, length_px, qr)
+            # With IDs every copy is a different label; otherwise one image.
+            ids = lp.next_ids(copies) if qr and self.cfg["qr_serial"] else []
+            imgs = [self._render(text, length_px, qr, serial)
+                    for serial in (ids or [None])]
             if self.landscape:
-                img = img.rotate(-90, expand=True)
+                imgs = [im.rotate(-90, expand=True) for im in imgs]
+            note = ""
+            if "label ID" in imgs[0].info.get("qr_dropped", []):
+                ids, imgs = [], imgs[:1]        # the codes hold no ID: use none up
+                note = "no room for the ID in the QR - "
+            img = imgs[0]
             floor = self.min_len if self.endless else 1
             if not (floor <= img.height <= self.max_len):
                 raise RuntimeError(
@@ -491,7 +502,7 @@ class LabelApp:
             qlr = lp.new_raster(self.cfg["model"], self.lab)
             qlr.exception_on_warning = True
             data = bytes(lp.convert(
-                qlr=qlr, images=[img] * copies, label=self.cfg["label"],
+                qlr=qlr, images=imgs if ids else imgs * copies, label=self.cfg["label"],
                 rotate=0, threshold=70.0, dither=False, compress=True,
                 red=(self.cfg["label"] == "62red"), dpi_600=False, hq=True,
                 cut=True))
@@ -516,9 +527,13 @@ class LabelApp:
                             "printed".format(" or ".join(loaded),
                                              self.cfg["label"]))
 
+            if ids:
+                lp.take_ids(ids)
             lp.send(data, self.cfg["transport"])
             plural = "" if copies == 1 else " x{}".format(copies)
-            self.results.put(("ok", "printed" + plural + "  " + warning, text))
+            if ids:
+                plural += "  ID " + ids[0] + (" .. " + ids[-1] if len(ids) > 1 else "")
+            self.results.put(("ok", "printed" + plural + "  " + note + warning, text))
         except Exception as exc:
             detail = str(exc) or exc.__class__.__name__
             traceback.print_exc()
@@ -533,6 +548,7 @@ class LabelApp:
                 self._set_status(msg, kind)
                 if kind == "ok" and text:
                     self._remember(text)
+                    self._schedule_render()     # show the next ID, not the used one
                     self.text.tag_add("sel", "1.0", "end-1c")
                     self.text.focus_set()
         except queue.Empty:

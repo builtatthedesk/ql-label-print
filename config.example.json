@@ -6,5 +6,6 @@
   "font": "C:/Windows/Fonts/arialbd.ttf",
   "margin": 4,
   "qr": false,
-  "qr_date": true
+  "qr_date": true,
+  "qr_serial": true
 }
