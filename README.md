@@ -68,7 +68,8 @@ Useful flags:
 - `--length`: length in dots for endless rolls (300 dpi is about 11.8 dots/mm)
 - `--landscape` / `--portrait`: override the orientation default
 - `--no-verify`: skip the pre-flight media check
-- `--qr`: add a QR code that encodes the label's text (see below)
+- `--qr` / `--no-qr`: add a QR code of the label's text (see below)
+- `--no-qr-date`: leave the print date out of the QR code
 - `--copies`, `--no-cut`, `--rotate`, `--font`, `--margin`
 
 ### Text is auto-fitted
@@ -84,6 +85,17 @@ font smaller.
 end of the label that encodes exactly the words printed on it, line breaks
 included. Scan it with a phone camera and you get the label's text back. The
 words are fitted into the space beside it.
+
+**The print date rides along in the code.** After the label's text, the QR holds
+one more line, `Printed: 2026-10-30`, which is not printed on the label. So
+anything you label gets dated even if you never write a date on it: scan it
+later and you know when it was made. It's always the last line and always in
+that format, so a scanner app can split it off. Turn it off with `--no-qr-date`
+or `"qr_date": false` in `config.json`.
+
+**The QR choice is remembered.** Ticking or unticking the box saves `"qr"` in
+`config.json`, and the command line uses the same setting (override with
+`--qr` / `--no-qr`). Leave it on and every label gets a code.
 
 The code is drawn as large as the label allows, and each square must be at
 least 4 dots (about 0.34 mm) so phones can read it. If the text is too long for

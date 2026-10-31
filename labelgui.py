@@ -146,17 +146,25 @@ class LabelApp:
 
     def _save_label(self, identifier: str) -> None:
         """Write the roll back to config.json so the CLI agrees."""
+        self._save_setting("label", identifier, "the roll")
+
+    def _save_setting(self, key: str, value, what: str) -> None:
         try:
             raw = json.loads(lp.CONFIG_PATH.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             raw = {}
-        raw["label"] = identifier
+        raw[key] = value
         try:
             lp.CONFIG_PATH.write_text(json.dumps(raw, indent=2) + "\n",
                                       encoding="utf-8")
         except OSError as exc:
-            self._set_status("could not save the roll to config.json: "
-                             "{}".format(exc), "err")
+            self._set_status("could not save {} to config.json: "
+                             "{}".format(what, exc), "err")
+
+    def _on_qr_toggle(self) -> None:
+        # Remembered, so a QR on every label can be the normal practice.
+        self._save_setting("qr", self.qr.get(), "the QR choice")
+        self._render_preview()
 
     # ---------------------------------------------------------------- ui
 
@@ -205,9 +213,9 @@ class LabelApp:
         # Applied to the preview and the print, never to the box you type in.
         opts = ttk.Frame(frm)
         opts.grid(row=2, column=0, sticky="e")
-        self.qr = tk.BooleanVar(value=False)
+        self.qr = tk.BooleanVar(value=bool(self.cfg["qr"]))
         ttk.Checkbutton(opts, text="QR code", variable=self.qr,
-                        command=self._render_preview).grid(row=0, column=0, padx=(0, 12))
+                        command=self._on_qr_toggle).grid(row=0, column=0, padx=(0, 12))
         self.cap_words = tk.BooleanVar(value=True)
         ttk.Checkbutton(opts, text="Capitalize Words", variable=self.cap_words,
                         command=self._render_preview).grid(row=0, column=1)
@@ -296,7 +304,7 @@ class LabelApp:
             qr = self.qr.get()
         return lp.render_text(text, self.lab, self.min_len, self.cfg["font"],
                               margin=self.margin, length_px=length_px, landscape=self.landscape,
-                              qr=qr)
+                              qr=qr, qr_date=bool(self.cfg["qr_date"]))
 
     @property
     def endless(self) -> bool:

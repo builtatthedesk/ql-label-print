@@ -47,6 +47,8 @@ DEFAULTS = {
     "font": "C:/Windows/Fonts/arialbd.ttf",
     "dpi_600": False,
     "cut": True,
+    "qr": False,        # QR code of the text on every label
+    "qr_date": True,    # ...with the print date as a last line, in the QR only
 }
 
 
@@ -193,6 +195,22 @@ QR_MIN_DOTS = 4   # smallest QR square, in dots (~0.34 mm at 300 dpi), we will p
 QR_QUIET = 2      # quiet-zone squares around the code; phones manage with 2
 
 
+QR_DATE_PREFIX = "Printed: "
+
+
+def qr_payload(text: str, with_date: bool = True) -> str:
+    """What the QR holds: the label text, then (optionally) the print date.
+
+    The date line goes in the code only, never on the label, so a label with
+    no date written on it still says when it was made. It is always the last
+    line and always "Printed: YYYY-MM-DD", so a scanner can split it off.
+    """
+    if not with_date:
+        return text
+    import datetime
+    return f"{text}\n{QR_DATE_PREFIX}{datetime.date.today().isoformat()}"
+
+
 def render_qr(text: str, side: int) -> Image.Image:
     """A QR code encoding text, as large as fits in a side x side square.
 
@@ -220,7 +238,8 @@ def render_qr(text: str, side: int) -> Image.Image:
 
 def render_text(text: str, lab, min_length: int, font_path: str,
                 margin: int = 12, length_px: int | None = None,
-                landscape: bool = False, qr: bool = False) -> Image.Image:
+                landscape: bool = False, qr: bool = False,
+                qr_date: bool = True) -> Image.Image:
     """Render text onto a white label-sized canvas.
 
     Die-cut labels have a fixed printable box. Endless labels have a fixed
@@ -231,7 +250,8 @@ def render_text(text: str, lab, min_length: int, font_path: str,
     keeps the preview honest: what you see is the label in reading orientation.
 
     qr=True puts a QR code of the exact text at the left end, as tall as the
-    label, and fits the words into what is left.
+    label, and fits the words into what is left. qr_date adds the print date
+    to the code (see qr_payload); the printed words are unchanged.
     """
     width, height = lab.dots_printable
     if height == 0:  # endless roll
@@ -247,7 +267,9 @@ def render_text(text: str, lab, min_length: int, font_path: str,
 
     left = 0
     if qr:
-        code = render_qr(text, min(height, width // 2))
+        if not text:
+            raise ValueError("a QR code needs some text")
+        code = render_qr(qr_payload(text, qr_date), min(height, width // 2))
         qy = (height - code.height) // 2
         if not landscape:  # same calibration nudge the text gets below
             qy = max(0, min(height - code.height, qy + TEXT_SHIFT_Y.get(lab.identifier, 0)))
@@ -556,8 +578,14 @@ def build_parser() -> argparse.ArgumentParser:
     orient.add_argument("--portrait", dest="landscape", action="store_false",
                         help="text across the short edge")
     common.add_argument("--preview", metavar="PNG", help="also save the rendered bitmap here")
-    common.add_argument("--qr", action="store_true",
-                        help="add a QR code that encodes the label text")
+    common.add_argument("--qr", action=argparse.BooleanOptionalAction,
+                        default=cfg["qr"],
+                        help="add a QR code that encodes the label text "
+                             "(default from config.json)")
+    common.add_argument("--qr-date", action=argparse.BooleanOptionalAction,
+                        default=cfg["qr_date"],
+                        help="put the print date in the QR code as a last "
+                             "line (QR only, not printed as words)")
     common.add_argument("--dry-run", action="store_true",
                         help="build the raster but write it to a file instead of "
                              "printing; the transport is still used for --label auto")
@@ -648,7 +676,8 @@ def main() -> int:
         text = args.text.replace("\\n", "\n")
         try:
             img = render_text(text, lab, min_len, args.font, margin=args.margin,
-                              length_px=args.length, landscape=landscape, qr=args.qr)
+                              length_px=args.length, landscape=landscape, qr=args.qr,
+                              qr_date=args.qr_date)
         except ValueError as exc:
             raise SystemExit(f"refusing to print: {exc}")
     else:

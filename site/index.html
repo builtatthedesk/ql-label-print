@@ -49,14 +49,15 @@ footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--line);color:v
   </div>
 
   <figure>
-    <img src="sample.png" width="991" height="306" alt="A rendered 29 by 90 millimetre label reading SPARE FUSES, Basement shelf 2, in large bold type">
-    <figcaption>The real raster for a 29 × 90 mm die-cut label. The text is sized automatically to the largest font that fits.</figcaption>
+    <img src="sample.png" width="991" height="306" alt="A rendered 29 by 90 millimetre label with a QR code on the left and SPARE FUSES, Basement shelf 2, in large bold type">
+    <figcaption>The real raster for a 29 × 90 mm die-cut label. The QR code holds the words plus the print date; the text is sized to the largest font that fits.</figcaption>
   </figure>
 
   <h2>What it does</h2>
   <div class="grid">
     <div class="card"><h3>Command line</h3><p><code>labelprint.py text "SPARE FUSES"</code> renders, fits and prints. Images work too.</p></div>
     <div class="card"><h3>Desktop window</h3><p>Type, see the exact label, click Print. Desktop shortcut and Ctrl+Alt+L hotkey.</p></div>
+    <div class="card"><h3>QR code, dated</h3><p>Optional QR code of the label's words, plus the print date hidden in the code. Scan any label and you know when it was made.</p></div>
     <div class="card"><h3>Checks the roll first</h3><p>Asks the printer what's loaded and refuses a wrong-size job before it jams the printer into a red error.</p></div>
     <div class="card"><h3>Any connection</h3><p>Network, Bluetooth (no pairing), USB, or a Windows print queue.</p></div>
   </div>

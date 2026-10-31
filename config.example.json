@@ -4,5 +4,7 @@
   "transport": "net://192.168.1.50",
   "status_transport": "bt://00:11:22:33:44:55",
   "font": "C:/Windows/Fonts/arialbd.ttf",
-  "margin": 4
+  "margin": 4,
+  "qr": false,
+  "qr_date": true
 }
