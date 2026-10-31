@@ -358,6 +358,8 @@ def render_text(text: str, lab, min_length: int, font_path: str,
     are unchanged. location=True makes a place label instead: a QR holding only
     "LOC: <text>" -- no date, no ID -- so a reprint scans the same.
     """
+    if location:
+        qr, qr_date, qr_serial = True, False, None
     width, height = lab.dots_printable
     if height == 0:  # endless roll
         if length_px is None and qr and landscape:
@@ -372,8 +374,6 @@ def render_text(text: str, lab, min_length: int, font_path: str,
 
     left = 0
     dropped: list[str] = []
-    if location:
-        qr, qr_date, qr_serial = True, False, None
     if qr:
         if not text:
             raise ValueError("a QR code needs some text")
@@ -761,7 +761,7 @@ def build_parser() -> argparse.ArgumentParser:
                             help="put the print date in the QR code as a last "
                                  "line (QR only, not printed as words)")
         common.add_argument("--location", action="store_true",
-                            help="a shelf/place label: QR holds only 'LOC: <text>' "
+                            help="text labels only: a shelf/place label whose QR holds only 'LOC: <text>' "
                                  "(no date, no ID) so items scanned after it are "
                                  "recorded there")
         common.add_argument("--qr-serial", action=argparse.BooleanOptionalAction,

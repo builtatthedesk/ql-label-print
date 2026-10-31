@@ -70,8 +70,8 @@ Useful flags:
 - `--no-verify`: skip the pre-flight media check
 - `--qr` / `--no-qr`: add a QR code of the label's text (see below)
 - `--qr-date` / `--no-qr-date`: include the print date in the QR code (default on)
-- `--location`: a shelf/place label (QR holds `LOC: <text>` only)
 - `--qr-serial` / `--no-qr-serial`: give each label a unique ID in its QR code (default on)
+- `--location`: a shelf/place label (QR holds `LOC: <text>` only)
 - `--copies`, `--no-cut`, `--rotate`, `--font`, `--margin`
 
 On a die-cut roll an image is fitted inside the label (aspect ratio kept) and
