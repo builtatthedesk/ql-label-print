@@ -72,6 +72,11 @@ Useful flags:
 - `--qr-date` / `--no-qr-date`: include the print date in the QR code (default on)
 - `--copies`, `--no-cut`, `--rotate`, `--font`, `--margin`
 
+On a die-cut roll an image is fitted inside the label (aspect ratio kept) and
+centred; a wide image goes along a long label unless you pass `--portrait`. On
+an endless roll it is scaled to the roll width and the label is as long as it
+needs to be.
+
 ### Text is auto-fitted
 
 The tool searches for the largest font at which the text still fits, re-wrapping
