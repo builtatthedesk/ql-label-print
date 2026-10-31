@@ -487,6 +487,10 @@ class LabelApp:
                     for serial in (ids or [None])]
             if self.landscape:
                 imgs = [im.rotate(-90, expand=True) for im in imgs]
+            note = ""
+            if "label ID" in imgs[0].info.get("qr_dropped", []):
+                ids, imgs = [], imgs[:1]        # the codes hold no ID: use none up
+                note = "no room for the ID in the QR - "
             img = imgs[0]
             floor = self.min_len if self.endless else 1
             if not (floor <= img.height <= self.max_len):
@@ -524,15 +528,12 @@ class LabelApp:
                                              self.cfg["label"]))
 
             if ids:
-                try:
-                    lp.take_ids(ids)
-                except SystemExit as exc:   # not an Exception; would kill the thread
-                    raise RuntimeError(str(exc))
+                lp.take_ids(ids)
             lp.send(data, self.cfg["transport"])
             plural = "" if copies == 1 else " x{}".format(copies)
             if ids:
                 plural += "  ID " + ids[0] + (" .. " + ids[-1] if len(ids) > 1 else "")
-            self.results.put(("ok", "printed" + plural + "  " + warning, text))
+            self.results.put(("ok", "printed" + plural + "  " + note + warning, text))
         except Exception as exc:
             detail = str(exc) or exc.__class__.__name__
             traceback.print_exc()
@@ -547,6 +548,7 @@ class LabelApp:
                 self._set_status(msg, kind)
                 if kind == "ok" and text:
                     self._remember(text)
+                    self._schedule_render()     # show the next ID, not the used one
                     self.text.tag_add("sel", "1.0", "end-1c")
                     self.text.focus_set()
         except queue.Empty:

@@ -26,6 +26,8 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -222,16 +224,23 @@ def qr_payload(text: str, with_date: bool = True, serial: str | None = None) -> 
     return "\n".join(lines)
 
 
+class IdCounterError(RuntimeError):
+    """The label-ID counter cannot safely hand out or record IDs."""
+
+
 def _serial_state() -> tuple[str, int]:
     """(today as YYMMDD, the next count for today)."""
     today = datetime.date.today().strftime("%y%m%d")
+    if not SERIAL_PATH.exists():
+        return today, 1
     try:
         state = json.loads(SERIAL_PATH.read_text(encoding="utf-8-sig"))
-        if state.get("day") == today:
-            return today, int(state["next"])
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        pass
-    return today, 1
+        day, nxt = state["day"], int(state["next"])
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        # Restarting at 001 would repeat today's IDs; make a human decide.
+        raise IdCounterError(f"{SERIAL_PATH.name} is unreadable ({exc}); fix "
+                             f"it, or delete it to restart today's count at 001")
+    return (today, nxt) if day == today else (today, 1)
 
 
 def next_ids(count: int) -> list[str]:
@@ -245,6 +254,34 @@ def next_ids(count: int) -> list[str]:
     return [f"{day}-{n + k:03d}" for k in range(count)]
 
 
+@contextmanager
+def _serial_lock(timeout: float = 10.0):
+    """Cross-process lock around the counter (the GUI and a scheduled CLI job
+    can print at the same moment). A lock older than 30 s is a crashed holder."""
+    lock = SERIAL_PATH.with_suffix(".lock")
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            break
+        except (FileExistsError, PermissionError):
+            try:
+                if time.time() - lock.stat().st_mtime > 30:
+                    lock.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+            if time.monotonic() > deadline:
+                raise IdCounterError(f"label ID counter is busy ({lock.name}); "
+                                     f"try again")
+            time.sleep(0.02)
+    try:
+        yield
+    finally:
+        os.close(fd)
+        lock.unlink(missing_ok=True)
+
+
 def take_ids(ids: list[str]) -> None:
     """Use up ids (from next_ids), just before the job is sent.
 
@@ -252,14 +289,27 @@ def take_ids(ids: list[str]) -> None:
     or midnight) refuse, so two labels can never share an ID. Taking them before
     sending means a failed send leaves a gap, never a duplicate.
     """
-    if next_ids(len(ids)) != ids:
-        raise SystemExit("label ID counter changed while this job was being "
-                         "prepared (another print, or midnight); run it again")
-    day, _, last = ids[-1].partition("-")
-    tmp = SERIAL_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps({"day": day, "next": int(last) + 1}) + "\n",
-                   encoding="utf-8")
-    os.replace(tmp, SERIAL_PATH)
+    with _serial_lock():
+        if next_ids(len(ids)) != ids:
+            raise IdCounterError("label ID counter changed while this job was "
+                                 "being prepared (another print, or midnight); "
+                                 "run it again")
+        day, _, last = ids[-1].partition("-")
+        fd, tmp = tempfile.mkstemp(dir=SERIAL_PATH.parent, prefix="serial-",
+                                   suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"day": day, "next": int(last) + 1}) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        for attempt in range(10):   # Windows: a reader can briefly block it
+            try:
+                os.replace(tmp, SERIAL_PATH)
+                break
+            except PermissionError:
+                if attempt == 9:
+                    os.unlink(tmp)
+                    raise
+                time.sleep(0.05)
 
 
 def render_qr(text: str, side: int) -> Image.Image:
@@ -318,12 +368,13 @@ def render_text(text: str, lab, min_length: int, font_path: str,
     draw = ImageDraw.Draw(canvas)
 
     left = 0
+    dropped: list[str] = []
     if qr:
         if not text:
             raise ValueError("a QR code needs some text")
         side = min(height, width // 2)
         # On a small roll the extra lines may not fit. The words matter most,
-        # then the ID, then the date -- so drop them in that reverse order.
+        # then the ID: drop the date first, then the ID.
         tries = [(qr_date, qr_serial), (False, qr_serial), (False, None)]
         tries = [t for i, t in enumerate(tries) if t not in tries[:i]]
         for n, (with_date, serial) in enumerate(tries):
@@ -337,9 +388,6 @@ def render_text(text: str, lab, min_length: int, font_path: str,
                    (("print date", qr_date, with_date),
                     ("label ID", qr_serial is not None, serial is not None))
                    if asked and not got]
-        if dropped:
-            print(f"note: {' and '.join(dropped)} left out of the QR code -- "
-                  f"no room on this roll", file=sys.stderr)
         qy = (height - code.height) // 2
         if not landscape:  # same calibration nudge the text gets below
             qy = max(0, min(height - code.height, qy + TEXT_SHIFT_Y.get(lab.identifier, 0)))
@@ -362,7 +410,9 @@ def render_text(text: str, lab, min_length: int, font_path: str,
         draw.text((x, y), line, font=font, fill=0, anchor="la")
         y += step
 
-    return canvas.convert("RGB")
+    img = canvas.convert("RGB")
+    img.info["qr_dropped"] = dropped   # what did not fit in the QR, if anything
+    return img
 
 
 def open_image(path: str) -> Image.Image:
@@ -804,8 +854,11 @@ def main() -> int:
     ids: list[str] = []
     if args.cmd == "text":
         text = args.text.replace("\\n", "\n")
-        if args.qr and args.qr_serial:
-            ids = next_ids(copies)
+        try:
+            if args.qr and args.qr_serial:
+                ids = next_ids(copies)
+        except IdCounterError as exc:
+            raise SystemExit(f"refusing to print: {exc}")
         try:
             # With IDs every copy is a different label; otherwise one image.
             imgs = [render_text(text, lab, min_len, args.font, margin=args.margin,
@@ -814,6 +867,12 @@ def main() -> int:
                     for serial in (ids or [None])]
         except ValueError as exc:
             raise SystemExit(f"refusing to print: {exc}")
+        dropped = imgs[0].info.get("qr_dropped", [])
+        if dropped:
+            print(f"note: {' and '.join(dropped)} left out of the QR code -- "
+                  f"no room on this roll", file=sys.stderr)
+        if "label ID" in dropped:   # the codes hold no ID: use none up
+            ids, imgs = [], imgs[:1]
         img = imgs[0]
     else:
         source = open_image(args.path)
@@ -897,7 +956,10 @@ def main() -> int:
         if destination.startswith("file://"):
             print(f"label ID {span} (dry run: not used up)")
         else:
-            take_ids(ids)
+            try:
+                take_ids(ids)
+            except IdCounterError as exc:
+                raise SystemExit(f"refusing to print: {exc}")
             print(f"label ID {span}")
     print(send(bytes(instructions), destination))
     return 0
