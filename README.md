@@ -70,6 +70,8 @@ Useful flags:
 - `--no-verify`: skip the pre-flight media check
 - `--qr` / `--no-qr`: add a QR code of the label's text (see below)
 - `--qr-date` / `--no-qr-date`: include the print date in the QR code (default on)
+- `--show-date` / `--no-show-date`: also print the date as words under the text, e.g. `Nov 2, 2026` (default off)
+- `--date DATE`: use this date (1-16-26, 1/16, Jan 16 2026, 2026-01-16...) in the QR (and the `--show-date` line) instead of today's (backdating old stock)
 - `--qr-serial` / `--no-qr-serial`: give each label a unique ID in its QR code (default on)
 - `--location`: a shelf/place label (QR holds `LOC: <text>` only)
 - `--command`: a command label (QR holds `CMD: <text>` only)
@@ -102,6 +104,25 @@ that format, so a scanner app can split it off. Turn it off with `--no-qr-date`
 or `"qr_date": false` in `config.json`. The date takes about 19 characters of
 room in the code, so on a roll too small for both (e.g. 23x23 with more than a
 word or two) the date is dropped and the QR keeps just the text.
+
+**Backdating.** Labelling something you've had for a while? `--date 2025-03-04`
+(or the **Date** box in the GUI; blank = today) puts that date on the
+`Printed:` line instead. Write it however: `1-16-26`, `1/16/2026`, `011626`,
+`Jan 16 26`, `1/16` (no year = the most recent one), `yesterday`. Month comes
+first, US style; the GUI shows what it read next to the box. Future dates are
+refused. The label ID still uses
+today's date — it's a print counter, and a backdated ID could repeat one
+already printed that day. The GUI's Date box is not remembered between launches.
+
+**Show the date on the label.** `--show-date` (or the **Show date** tick in the
+window) prints the date as words too, in a smaller line under the text:
+`Nov 2, 2026`. It is the same date as the QR's `Printed:` line, so `--date` /
+the Date box backdates it as well, and it works with or without a QR, on
+endless and die-cut rolls; the words shrink to make room. The QR payload is
+unchanged. If a small roll has no room for the date in the QR, the words still
+show it. Shelf and command labels never get one (they're undated on purpose).
+The window remembers the tick in `config.json` (`"show_date": true`), which the
+command line then uses as its default.
 
 **Every label gets its own ID** (when the QR is on). The QR's last line is `ID: 261030-001`: the
 print date (YYMMDD) and that day's count, so five "Lemons" labels scan as five

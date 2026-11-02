@@ -7,5 +7,6 @@
   "margin": 4,
   "qr": false,
   "qr_date": true,
-  "qr_serial": true
+  "qr_serial": true,
+  "show_date": false
 }
