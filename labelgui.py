@@ -15,6 +15,7 @@ install-shortcut.ps1 puts a Desktop shortcut on that command.
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import queue
 import re
@@ -32,10 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import labelprint as lp  # noqa: E402  (needs the path fix above)
 
 HERE = Path(__file__).resolve().parent
-HISTORY_PATH = HERE / "gui-history.json"
+HISTORY_PATH = HERE / "gui-history.json"   # labels printed, newest first, with their settings
 HISTORY_MAX = 15
-DATE_HISTORY_PATH = HERE / "gui-dates.json"   # backdates used, newest first
-DATE_HISTORY_MAX = 10
 PREVIEW_W = 660          # px of window space the preview gets
 DEBOUNCE_MS = 150        # re-render this long after the last keystroke
 DOTS_PER_MM = 300 / 25.4     # 300 dpi head
@@ -234,15 +233,12 @@ class LabelApp:
         # Backdates the QR's "Printed:" line, for labelling old stock with the
         # day it was bought. Blank = today. Always starts blank -- a stale
         # backdate on tomorrow's labels would be wrong without anyone
-        # noticing -- but the dropdown holds the last dates printed with.
+        # noticing. Recent... brings an old label back with its date.
         ttk.Label(opts, text="Date").grid(row=0, column=3, padx=(12, 4))
         self.qr_date_var = tk.StringVar(value="")
-        self.date_history = self._load_date_history()
-        self.date_box = ttk.Combobox(opts, textvariable=self.qr_date_var, width=11,
-                                     values=self.date_history)
+        self.date_box = ttk.Entry(opts, textvariable=self.qr_date_var, width=11)
         self.date_box.grid(row=0, column=4)
         self.date_box.bind("<KeyRelease>", self._on_date_typed)
-        self.date_box.bind("<<ComboboxSelected>>", self._on_date_typed)
         # Echoes what the box was read as, so 1-16-26 visibly means Jan 16.
         self.date_seen = ttk.Label(opts, text="", width=13, foreground="#666")
         self.date_seen.grid(row=0, column=5, padx=(4, 0))
@@ -298,7 +294,7 @@ class LabelApp:
                         variable=self.verify).grid(row=0, column=6, padx=12)
 
         self.history = self._load_history()
-        self.recent = ttk.Combobox(ctl, values=self.history, width=28,
+        self.recent = ttk.Combobox(ctl, values=self._history_names(), width=34,
                                    state="readonly")
         self.recent.set("Recent...")
         self.recent.grid(row=0, column=7, sticky="e", padx=(0, 8))
@@ -548,6 +544,16 @@ class LabelApp:
         except ValueError as exc:
             self._set_status(str(exc), "err")
             return
+        # What Recent... restores: the label as printed, not the box as it is
+        # when the print finishes. A "today" label keeps the day it was made.
+        self.pending = {
+            "text": text,
+            "date": (date or datetime.date.today()).isoformat(),
+            "qr": self.qr.get(), "show_date": self.show_date.get(),
+            "location": self.location.get(), "cap_words": self.cap_words.get(),
+            "along_roll": self.along_roll.get(), "auto_length": self.auto_length.get(),
+            "length_mm": self.length_mm.get(),
+        }
         self.printing = True
         self.print_btn.configure(state="disabled")
         self._set_status("checking the roll..." if self.verify.get()
@@ -634,8 +640,7 @@ class LabelApp:
                 self.print_btn.configure(state="normal")
                 self._set_status(msg, kind)
                 if kind == "ok" and text:
-                    self._remember(text)
-                    self._remember_date(date)
+                    self._remember(getattr(self, "pending", None) or {"text": text})
                     self._schedule_render()     # show the next ID, not the used one
                     self.text.tag_add("sel", "1.0", "end-1c")
                     self.text.focus_set()
@@ -646,45 +651,49 @@ class LabelApp:
     # ------------------------------------------------------------ history
 
     def _load_history(self) -> list:
+        """Labels printed, newest first: dicts of text plus the settings used.
+        Older files held only the text, one string per label."""
         try:
-            return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))[:HISTORY_MAX]
+            saved = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
         except Exception:
             return []
+        out = []
+        for h in saved if isinstance(saved, list) else []:
+            if isinstance(h, str):
+                h = {"text": h.replace(" \\n ", "\n")}
+            if isinstance(h, dict) and isinstance(h.get("text"), str) and h["text"]:
+                out.append(h)
+        return out[:HISTORY_MAX]
 
-    def _remember(self, text: str) -> None:
-        one_line = text.replace("\n", " \\n ")
-        self.history = [one_line] + [h for h in self.history if h != one_line]
+    def _history_names(self) -> list:
+        """One line per remembered label for the Recent... list."""
+        names = []
+        for h in self.history:
+            name = " / ".join(h["text"].splitlines())
+            if len(name) > 28:
+                name = name[:27] + "..."
+            bits = [name]
+            if h.get("location"):
+                bits.append("shelf")
+            elif h.get("date"):
+                try:
+                    bits.append(datetime.date.fromisoformat(h["date"]).strftime("%b %d").replace(" 0", " "))
+                except ValueError:
+                    pass
+            names.append("  -  ".join(bits))
+        return names
+
+    def _remember(self, entry: dict) -> None:
+        """Put the label just printed at the top of Recent...; the same label
+        (same words, date and settings) printed again moves up, not in twice."""
+        self.history = [entry] + [h for h in self.history if h != entry]
         self.history = self.history[:HISTORY_MAX]
         try:
             HISTORY_PATH.write_text(json.dumps(self.history, indent=2),
                                     encoding="utf-8")
         except OSError:
             pass
-        self.recent.configure(values=self.history)
-
-    def _load_date_history(self) -> list:
-        try:
-            saved = json.loads(DATE_HISTORY_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            return []
-        if not isinstance(saved, list):
-            return []
-        return [h for h in saved if isinstance(h, str)][:DATE_HISTORY_MAX]
-
-    def _remember_date(self, d) -> None:
-        """Keep the backdate just printed with at the top of the dropdown.
-        d is what the worker printed (None = today), not the box as it is now."""
-        if d is None:
-            return
-        shown = d.strftime("%m/%d/%Y")
-        self.date_history = [shown] + [h for h in self.date_history if h != shown]
-        self.date_history = self.date_history[:DATE_HISTORY_MAX]
-        try:
-            DATE_HISTORY_PATH.write_text(json.dumps(self.date_history, indent=2),
-                                         encoding="utf-8")
-        except OSError:
-            pass
-        self.date_box.configure(values=self.date_history)
+        self.recent.configure(values=self._history_names())
 
     def _clear(self) -> None:
         self.text.delete("1.0", "end")
@@ -697,10 +706,38 @@ class LabelApp:
         self._render_preview()
 
     def _pick_recent(self, _event) -> None:
-        chosen = self.recent.get().replace(" \\n ", "\n")
-        self.text.delete("1.0", "end")
-        self.text.insert("1.0", chosen)
+        """Bring a printed label back exactly: words, date, QR, Show date,
+        shelf, layout. Copies go back to 1 and a reprint gets a new ID --
+        another pack of the same food is still its own pack."""
+        i = self.recent.current()
         self.recent.set("Recent...")
+        if not 0 <= i < len(self.history):
+            return
+        h = self.history[i]
+        self.text.delete("1.0", "end")
+        self.text.insert("1.0", h["text"])
+        self.copies.set(1)
+        date = h.get("date")
+        if date:
+            try:
+                d = datetime.date.fromisoformat(date)
+                self.qr_date_var.set("" if d == datetime.date.today() else d.strftime("%m/%d/%Y"))
+            except ValueError:
+                self.qr_date_var.set("")
+        else:
+            self.qr_date_var.set("")
+        for var, k in ((self.qr, "qr"), (self.show_date, "show_date"),
+                       (self.location, "location"), (self.cap_words, "cap_words"),
+                       (self.along_roll, "along_roll"), (self.auto_length, "auto_length")):
+            if k in h:
+                var.set(bool(h[k]))
+        if h.get("length_mm"):
+            self.length_mm.set(str(h["length_mm"]))
+        if "along_roll" in h:
+            self._on_orientation_toggle()
+        self._sync_length_state()
+        self._on_date_typed()
+        self._set_status("brought back - Print makes another (with a new ID)")
         self.text.focus_set()
         self._render_preview()
 

@@ -187,7 +187,7 @@ Puts a **Print a label** shortcut on the Desktop (and Start menu), running
 - On **endless** rolls, **Length auto** works out how much roll the text needs;
   untick it to set a fixed length.
 - **Along the roll** turns the text 90° so a narrow roll makes a big label.
-- Recent labels are kept in `gui-history.json` for one-click reprints.
+- **Recent...** brings back a printed label with its settings (words, date, QR, Show date, shelf, layout) for a one-click reprint; copies go back to 1 and each reprint gets a new ID. Kept in `gui-history.json`. The Date box is a plain box; type a date or leave it blank for today.
 
 ## Transports
 
