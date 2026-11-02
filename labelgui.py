@@ -548,11 +548,15 @@ class LabelApp:
         # when the print finishes. A "today" label keeps the day it was made.
         self.pending = {
             "text": text,
-            "date": (date or datetime.date.today()).isoformat(),
+            # Only a date that went on the label; a "today" label keeps its day.
+            "date": (date or datetime.date.today()).isoformat() if date is not None
+                    or ((self.qr.get() or self.show_date.get()) and not self.location.get()) else None,
             "qr": self.qr.get(), "show_date": self.show_date.get(),
             "location": self.location.get(), "cap_words": self.cap_words.get(),
+            # Layout belongs to the roll: kept with it, restored only on that roll.
+            "roll": self.cfg["label"],
             "along_roll": self.along_roll.get(), "auto_length": self.auto_length.get(),
-            "length_mm": self.length_mm.get(),
+            "length_mm": None if self.auto_length.get() else self.length_mm.get(),
         }
         self.printing = True
         self.print_btn.configure(state="disabled")
@@ -662,6 +666,8 @@ class LabelApp:
             if isinstance(h, str):
                 h = {"text": h.replace(" \\n ", "\n")}
             if isinstance(h, dict) and isinstance(h.get("text"), str) and h["text"]:
+                if not isinstance(h.get("date"), str):
+                    h["date"] = None
                 out.append(h)
         return out[:HISTORY_MAX]
 
@@ -727,14 +733,19 @@ class LabelApp:
         else:
             self.qr_date_var.set("")
         for var, k in ((self.qr, "qr"), (self.show_date, "show_date"),
-                       (self.location, "location"), (self.cap_words, "cap_words"),
-                       (self.along_roll, "along_roll"), (self.auto_length, "auto_length")):
+                       (self.location, "location"), (self.cap_words, "cap_words")):
             if k in h:
                 var.set(bool(h[k]))
-        if h.get("length_mm"):
-            self.length_mm.set(str(h["length_mm"]))
-        if "along_roll" in h:
-            self._on_orientation_toggle()
+        # A die-cut roll sets its own direction; an entry from another roll
+        # would print sideways, so its layout stays as the loaded roll has it.
+        if h.get("roll") == self.cfg["label"]:
+            for var, k in ((self.along_roll, "along_roll"), (self.auto_length, "auto_length")):
+                if k in h:
+                    var.set(bool(h[k]))
+            if h.get("length_mm") and not self.auto_length.get():
+                self.length_mm.set(str(h["length_mm"]))
+            if "along_roll" in h:
+                self._on_orientation_toggle()
         self._sync_length_state()
         self._on_date_typed()
         self._set_status("brought back - Print makes another (with a new ID)")
