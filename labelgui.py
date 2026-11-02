@@ -620,22 +620,22 @@ class LabelApp:
             plural = "" if copies == 1 else " x{}".format(copies)
             if ids:
                 plural += "  ID " + ids[0] + (" .. " + ids[-1] if len(ids) > 1 else "")
-            self.results.put(("ok", "printed" + plural + "  " + note + warning, text))
+            self.results.put(("ok", "printed" + plural + "  " + note + warning, text, date))
         except Exception as exc:
             detail = str(exc) or exc.__class__.__name__
             traceback.print_exc()
-            self.results.put(("err", detail, None))
+            self.results.put(("err", detail, None, None))
 
     def _drain_results(self) -> None:
         try:
             while True:
-                kind, msg, text = self.results.get_nowait()
+                kind, msg, text, date = self.results.get_nowait()
                 self.printing = False
                 self.print_btn.configure(state="normal")
                 self._set_status(msg, kind)
                 if kind == "ok" and text:
                     self._remember(text)
-                    self._remember_date()
+                    self._remember_date(date)
                     self._schedule_render()     # show the next ID, not the used one
                     self.text.tag_add("sel", "1.0", "end-1c")
                     self.text.focus_set()
@@ -664,16 +664,16 @@ class LabelApp:
 
     def _load_date_history(self) -> list:
         try:
-            return json.loads(DATE_HISTORY_PATH.read_text(encoding="utf-8"))[:DATE_HISTORY_MAX]
+            saved = json.loads(DATE_HISTORY_PATH.read_text(encoding="utf-8"))
         except Exception:
             return []
+        if not isinstance(saved, list):
+            return []
+        return [h for h in saved if isinstance(h, str)][:DATE_HISTORY_MAX]
 
-    def _remember_date(self) -> None:
-        """Keep the backdate just printed with at the top of the dropdown."""
-        try:
-            d = self._qr_date()
-        except ValueError:
-            return
+    def _remember_date(self, d) -> None:
+        """Keep the backdate just printed with at the top of the dropdown.
+        d is what the worker printed (None = today), not the box as it is now."""
         if d is None:
             return
         shown = d.strftime("%m/%d/%Y")
