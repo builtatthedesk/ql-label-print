@@ -20,3 +20,4 @@ btspp.exe
 *.png
 label.bin
 !site/*.png
+gui-dates.json
