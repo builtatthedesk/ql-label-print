@@ -54,6 +54,7 @@ DEFAULTS = {
     "qr": False,        # QR code of the text on every label
     "qr_date": True,    # ...with the print date as a last line, in the QR only
     "qr_serial": True,  # ...and a unique ID per label (see next_ids)
+    "show_date": False, # print the date as words too, small, under the text
 }
 
 
@@ -194,6 +195,31 @@ def fit_text(path: str, text: str, box: tuple[int, int]):
         font = ImageFont.truetype(path, 6)
         best = (font, wrap_at_size(probe, paragraphs, font, max_w))
     return best
+
+
+DATE_RATIO = 0.45     # visible date: font size as a share of the words' size
+DATE_MIN_PX = 24      # ...but no smaller than this (~2 mm tall) unless it won't fit
+DATE_GAP = 0.15       # blank space above the date, as a share of its size
+
+
+def visible_date(d: datetime.date) -> str:
+    """The date as printed under the words: "Nov 2, 2026"."""
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def fit_date(path: str, stamp: str, word_size: int, max_w: int):
+    """Font for the visible date line under words of word_size, and the height
+    the line takes (gap included). Smaller than the words, never wider than
+    max_w: it shrinks below DATE_MIN_PX only when the width forces it."""
+    probe = ImageDraw.Draw(Image.new("L", (1, 1)))
+    size = min(word_size, max(DATE_MIN_PX, int(word_size * DATE_RATIO)))
+    while True:
+        font = ImageFont.truetype(path, size)
+        if size <= 8 or probe.textbbox((0, 0), stamp, font=font)[2] <= max_w:
+            break
+        size -= 1
+    ascent, descent = font.getmetrics()
+    return font, ascent + descent + int(size * DATE_GAP)
 
 
 QR_MIN_DOTS = 4   # smallest QR square, in dots (~0.34 mm at 300 dpi), we will print
@@ -423,7 +449,8 @@ def render_text(text: str, lab, min_length: int, font_path: str,
                 landscape: bool = False, qr: bool = False,
                 qr_date: bool = True, qr_serial: str | None = None,
                 location: bool = False, command: bool = False,
-                date: datetime.date | None = None) -> Image.Image:
+                date: datetime.date | None = None,
+                show_date: bool = False) -> Image.Image:
     """Render text onto a white label-sized canvas.
 
     Die-cut labels have a fixed printable box. Endless labels have a fixed
@@ -439,11 +466,18 @@ def render_text(text: str, lab, min_length: int, font_path: str,
     are unchanged. location=True makes a place label instead: a QR holding only
     "LOC: <text>" -- no date, no ID -- so a reprint scans the same. command=True
     is the same with "CMD: <text>", for labels that tell a scan page what to do.
+
+    show_date=True also prints the date as words ("Nov 2, 2026"), in a smaller
+    line under the text. It is the same date the QR's "Printed:" line holds
+    (date, else today), with or without a QR. Place and command labels are
+    undated by design, so they never get one.
     """
     prefix = (QR_LOCATION_PREFIX if location
               else QR_COMMAND_PREFIX if command else None)
     if prefix:
         qr, qr_date, qr_serial = True, False, None
+    when = date or datetime.date.today()   # one date for the QR and the words
+    stamp = visible_date(when) if show_date and not prefix else None
     width, height = lab.dots_printable
     if height == 0:  # endless roll
         if length_px is None and qr and landscape:
@@ -469,7 +503,7 @@ def render_text(text: str, lab, min_length: int, font_path: str,
         for n, (with_date, serial) in enumerate(tries):
             try:
                 payload = (prefix + text if prefix
-                           else qr_payload(text, with_date, serial, date))
+                           else qr_payload(text, with_date, serial, when))
                 code = render_qr(payload, side)
                 break
             except ValueError:
@@ -488,18 +522,32 @@ def render_text(text: str, lab, min_length: int, font_path: str,
 
     box = (width - 2 * margin, height - 2 * margin)
     font, lines = fit_text(font_path, text, box)
+    date_font, date_h = None, 0
+    if stamp:
+        # The date's size follows the words', and the words fit in what the
+        # date leaves; twice round settles it.
+        for _ in range(2):
+            date_font, date_h = fit_date(font_path, stamp, font.size, box[0])
+            font, lines = fit_text(font_path, text, (box[0], max(1, box[1] - date_h)))
 
     ascent, descent = font.getmetrics()
     step = int((ascent + descent) * LINE_SPACING)
-    y = (height - step * len(lines)) // 2
+    block = step * len(lines) + date_h
+    y = (height - block) // 2
     if not landscape:  # centre on the label, not the printable box, if it fits
-        y = max(0, min(height - step * len(lines), y + TEXT_SHIFT_Y.get(lab.identifier, 0)))
+        y = max(0, min(height - block, y + TEXT_SHIFT_Y.get(lab.identifier, 0)))
 
     for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font)
         x = left + (width - (bbox[2] - bbox[0])) // 2 - bbox[0]
         draw.text((x, y), line, font=font, fill=0, anchor="la")
         y += step
+
+    if stamp:
+        bbox = draw.textbbox((0, 0), stamp, font=date_font)
+        x = left + (width - (bbox[2] - bbox[0])) // 2 - bbox[0]
+        draw.text((x, y + int(date_font.size * DATE_GAP)), stamp, font=date_font,
+                  fill=0, anchor="la")
 
     img = canvas.convert("RGB")
     img.info["qr_dropped"] = dropped   # what did not fit in the QR, if anything
@@ -844,6 +892,12 @@ def build_parser() -> argparse.ArgumentParser:
                             default=cfg["qr_date"],
                             help="put the print date in the QR code as a last "
                                  "line (QR only, not printed as words)")
+        common.add_argument("--show-date", action=argparse.BooleanOptionalAction,
+                            default=cfg["show_date"],
+                            help="also print the date as words (e.g. Nov 2, 2026) in "
+                                 "a smaller line under the text -- the same date as "
+                                 "the QR's Printed: line, so --date backdates it too "
+                                 "(default from config.json, else off)")
         common.add_argument("--date", type=parse_date, default=None, metavar="DATE",
                             help="put this date in the QR instead of today's, e.g. "
                                  "when the item was bought: 1-16-26, Jan 16, 2026-01-16 (implies --qr-date; the "
@@ -969,7 +1023,8 @@ def main() -> int:
                                 length_px=args.length, landscape=landscape, qr=args.qr,
                                 qr_date=args.qr_date or args.date is not None,
                                 qr_serial=serial, location=args.location,
-                                command=args.command, date=args.date)
+                                command=args.command, date=args.date,
+                                show_date=args.show_date)
                     for serial in (ids or [None])]
         except ValueError as exc:
             raise SystemExit(f"refusing to print: {exc}")

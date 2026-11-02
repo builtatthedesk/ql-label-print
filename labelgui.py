@@ -167,6 +167,11 @@ class LabelApp:
         self._save_setting("qr", self.qr.get(), "the QR choice")
         self._render_preview()
 
+    def _on_show_date_toggle(self) -> None:
+        # Remembered like the QR: dated labels are a habit, not a one-off.
+        self._save_setting("show_date", self.show_date.get(), "the Show date choice")
+        self._render_preview()
+
     # ---------------------------------------------------------------- ui
 
     def _build_ui(self) -> None:
@@ -235,6 +240,11 @@ class LabelApp:
         # Echoes what the box was read as, so 1-16-26 visibly means Jan 16.
         self.date_seen = ttk.Label(opts, text="", width=13, foreground="#666")
         self.date_seen.grid(row=0, column=5, padx=(4, 0))
+        # Prints that same date as words under the text, QR or not.
+        self.show_date = tk.BooleanVar(value=bool(self.cfg.get("show_date", False)))
+        ttk.Checkbutton(opts, text="Show date", variable=self.show_date,
+                        command=self._on_show_date_toggle).grid(row=0, column=6,
+                                                                padx=(8, 0))
 
         self.canvas = tk.Canvas(frm, height=230, background="#e9e9e9",
                                 highlightthickness=1,
@@ -336,18 +346,21 @@ class LabelApp:
 
     def _render(self, text: str, length_px: int | None = None,
                 qr: bool | None = None, serial: str | None = None,
-                location: bool | None = None, date=None) -> Image.Image:
+                location: bool | None = None, date=None,
+                show_date: bool | None = None) -> Image.Image:
         if qr is None:          # the print worker passes these; Tk vars are UI-thread only
             qr = self.qr.get()
             location = self.location.get()
-            date = self._qr_date() if qr and not location else None
+            show_date = self.show_date.get()
+            date = self._qr_date() if (qr or show_date) and not location else None
             # The preview shows the next ID without using it up.
             if qr and self.cfg["qr_serial"] and not location:
                 serial = lp.next_ids(1)[0]
         return lp.render_text(text, self.lab, self.min_len, self.cfg["font"],
                               margin=self.margin, length_px=length_px, landscape=self.landscape,
                               qr=qr, qr_date=bool(self.cfg["qr_date"]) or date is not None,
-                              qr_serial=serial, location=bool(location), date=date)
+                              qr_serial=serial, location=bool(location), date=date,
+                              show_date=bool(show_date))
 
     @property
     def endless(self) -> bool:
@@ -386,6 +399,7 @@ class LabelApp:
         # the size comes down until the label fits inside it.
         max_len = int(AUTO_MAX_MM * DOTS_PER_MM) - 2 * self.margin
         lines = [ln for ln in paragraphs if ln.strip()] or [""]
+        stamp = self._stamp()
 
         best = None
         lo, hi = 6, 800
@@ -394,6 +408,8 @@ class LabelApp:
             font = ImageFont.truetype(self.cfg["font"], mid)
             ascent, descent = font.getmetrics()
             stacked = int((ascent + descent) * lp.LINE_SPACING * len(lines))
+            if stamp:
+                stacked += lp.fit_date(self.cfg["font"], stamp, mid, max_len)[1]
             widest = max((probe.textbbox((0, 0), ln, font=font)[2]
                           for ln in lines), default=0)
             if stacked <= max_h and widest <= max_len:
@@ -461,7 +477,20 @@ class LabelApp:
         ascent, descent = font.getmetrics()
         height = int((ascent + descent) * lp.LINE_SPACING * len(lines)) \
             + 2 * self.margin
+        stamp = self._stamp()
+        if stamp:                            # room for the date line under it
+            height += lp.fit_date(self.cfg["font"], stamp, font.size, max_w)[1]
         return max(self.min_len, min(self.max_len, height))
+
+    def _stamp(self) -> str | None:
+        """The visible date line the label will get, for sizing; None if none."""
+        if not self.show_date.get() or self.location.get():
+            return None
+        try:
+            d = self._qr_date()
+        except ValueError:
+            d = None
+        return lp.visible_date(d or lp.datetime.date.today())
 
     def _render_preview(self) -> None:
         self.render_job = None
@@ -507,8 +536,9 @@ class LabelApp:
         except (tk.TclError, ValueError):
             copies = 1
         try:
-            date = (self._qr_date() if self.qr.get() and not self.location.get()
-                    else None)
+            date = (self._qr_date()
+                    if (self.qr.get() or self.show_date.get())
+                    and not self.location.get() else None)
         except ValueError as exc:
             self._set_status(str(exc), "err")
             return
@@ -521,18 +551,20 @@ class LabelApp:
         threading.Thread(target=self._print_worker,
                          args=(text, copies, self.verify.get(),
                                self._length_px(text), self.qr.get(),
-                               self.location.get(), date),
+                               self.location.get(), date, self.show_date.get()),
                          daemon=True).start()
 
     def _print_worker(self, text: str, copies: int, verify: bool,
                       length_px: int | None = None, qr: bool = False,
-                      location: bool = False, date=None) -> None:
+                      location: bool = False, date=None,
+                      show_date: bool = False) -> None:
         """Render, rasterise and send. Runs off the UI thread."""
         try:
             # With IDs every copy is a different label; otherwise one image.
             ids = (lp.next_ids(copies)
                    if qr and self.cfg["qr_serial"] and not location else [])
-            imgs = [self._render(text, length_px, qr, serial, location, date)
+            imgs = [self._render(text, length_px, qr, serial, location, date,
+                                 show_date)
                     for serial in (ids or [None])]
             if self.landscape:
                 imgs = [im.rotate(-90, expand=True) for im in imgs]
