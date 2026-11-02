@@ -34,6 +34,8 @@ import labelprint as lp  # noqa: E402  (needs the path fix above)
 HERE = Path(__file__).resolve().parent
 HISTORY_PATH = HERE / "gui-history.json"
 HISTORY_MAX = 15
+DATE_HISTORY_PATH = HERE / "gui-dates.json"   # backdates used, newest first
+DATE_HISTORY_MAX = 10
 PREVIEW_W = 660          # px of window space the preview gets
 DEBOUNCE_MS = 150        # re-render this long after the last keystroke
 DOTS_PER_MM = 300 / 25.4     # 300 dpi head
@@ -230,13 +232,17 @@ class LabelApp:
         ttk.Checkbutton(opts, text="Capitalize Words", variable=self.cap_words,
                         command=self._render_preview).grid(row=0, column=1)
         # Backdates the QR's "Printed:" line, for labelling old stock with the
-        # day it was bought. Blank = today. Not remembered: a stale backdate
-        # on tomorrow's labels would be wrong without anyone noticing.
+        # day it was bought. Blank = today. Always starts blank -- a stale
+        # backdate on tomorrow's labels would be wrong without anyone
+        # noticing -- but the dropdown holds the last dates printed with.
         ttk.Label(opts, text="Date").grid(row=0, column=3, padx=(12, 4))
         self.qr_date_var = tk.StringVar(value="")
-        date_box = ttk.Entry(opts, textvariable=self.qr_date_var, width=11)
-        date_box.grid(row=0, column=4)
-        date_box.bind("<KeyRelease>", self._on_date_typed)
+        self.date_history = self._load_date_history()
+        self.date_box = ttk.Combobox(opts, textvariable=self.qr_date_var, width=11,
+                                     values=self.date_history)
+        self.date_box.grid(row=0, column=4)
+        self.date_box.bind("<KeyRelease>", self._on_date_typed)
+        self.date_box.bind("<<ComboboxSelected>>", self._on_date_typed)
         # Echoes what the box was read as, so 1-16-26 visibly means Jan 16.
         self.date_seen = ttk.Label(opts, text="", width=13, foreground="#666")
         self.date_seen.grid(row=0, column=5, padx=(4, 0))
@@ -629,6 +635,7 @@ class LabelApp:
                 self._set_status(msg, kind)
                 if kind == "ok" and text:
                     self._remember(text)
+                    self._remember_date()
                     self._schedule_render()     # show the next ID, not the used one
                     self.text.tag_add("sel", "1.0", "end-1c")
                     self.text.focus_set()
@@ -655,9 +662,35 @@ class LabelApp:
             pass
         self.recent.configure(values=self.history)
 
+    def _load_date_history(self) -> list:
+        try:
+            return json.loads(DATE_HISTORY_PATH.read_text(encoding="utf-8"))[:DATE_HISTORY_MAX]
+        except Exception:
+            return []
+
+    def _remember_date(self) -> None:
+        """Keep the backdate just printed with at the top of the dropdown."""
+        try:
+            d = self._qr_date()
+        except ValueError:
+            return
+        if d is None:
+            return
+        shown = d.strftime("%m/%d/%Y")
+        self.date_history = [shown] + [h for h in self.date_history if h != shown]
+        self.date_history = self.date_history[:DATE_HISTORY_MAX]
+        try:
+            DATE_HISTORY_PATH.write_text(json.dumps(self.date_history, indent=2),
+                                         encoding="utf-8")
+        except OSError:
+            pass
+        self.date_box.configure(values=self.date_history)
+
     def _clear(self) -> None:
         self.text.delete("1.0", "end")
         self.copies.set(1)
+        self.qr_date_var.set("")             # back to today
+        self._on_date_typed()
         self.recent.set("Recent...")
         self._set_status("")
         self.text.focus_set()
