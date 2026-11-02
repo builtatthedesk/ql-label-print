@@ -71,7 +71,7 @@ Useful flags:
 - `--qr` / `--no-qr`: add a QR code of the label's text (see below)
 - `--qr-date` / `--no-qr-date`: include the print date in the QR code (default on)
 - `--show-date` / `--no-show-date`: also print the date as words under the text, e.g. `Nov 2, 2026` (default off)
-- `--date DATE`: use this date (1-16-26, 1/16, Jan 16 2026, 2026-01-16...) in the QR instead of today's (backdating old stock)
+- `--date DATE`: use this date (1-16-26, 1/16, Jan 16 2026, 2026-01-16...) in the QR (and the `--show-date` line) instead of today's (backdating old stock)
 - `--qr-serial` / `--no-qr-serial`: give each label a unique ID in its QR code (default on)
 - `--location`: a shelf/place label (QR holds `LOC: <text>` only)
 - `--command`: a command label (QR holds `CMD: <text>` only)

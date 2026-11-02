@@ -239,7 +239,8 @@ def qr_payload(text: str, with_date: bool = True, serial: str | None = None,
     """What the QR holds: the label text, then (optionally) the print date
     and the label's unique ID.
 
-    These lines go in the code only, never on the label, so a label with no
+    These lines go in the code (the date is printed as words too only with
+    show_date; see render_text), so a label with no
     date written on it still says when it was made, and five identical labels
     still scan as five different items. They always come last, in this order,
     as "Printed: YYYY-MM-DD" and "ID: 261030-001", so a scanner can split them
@@ -891,7 +892,7 @@ def build_parser() -> argparse.ArgumentParser:
         common.add_argument("--qr-date", action=argparse.BooleanOptionalAction,
                             default=cfg["qr_date"],
                             help="put the print date in the QR code as a last "
-                                 "line (QR only, not printed as words)")
+                                 "line (QR only; see --show-date to print it as words)")
         common.add_argument("--show-date", action=argparse.BooleanOptionalAction,
                             default=cfg["show_date"],
                             help="also print the date as words (e.g. Nov 2, 2026) in "
@@ -899,7 +900,7 @@ def build_parser() -> argparse.ArgumentParser:
                                  "the QR's Printed: line, so --date backdates it too "
                                  "(default from config.json, else off)")
         common.add_argument("--date", type=parse_date, default=None, metavar="DATE",
-                            help="put this date in the QR instead of today's, e.g. "
+                            help="put this date in the QR (and the --show-date line) instead of today's, e.g. "
                                  "when the item was bought: 1-16-26, Jan 16, 2026-01-16 (implies --qr-date; the "
                                  "label ID still uses today)")
         common.add_argument("--location", action="store_true",
