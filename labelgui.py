@@ -347,6 +347,19 @@ class LabelApp:
             self.printer_box.set(self.cfg["printer"])
             self._set_status("wait for the print to finish before switching", "err")
             return
+        # Check the profile loads before saving it or tearing the window down:
+        # a bad model/roll would otherwise leave an empty window and a
+        # config.json the next launch dies on too.
+        try:
+            cfg = lp.load_config(name)
+            if cfg["model"] not in {m.identifier for m in lp.ALL_MODELS}:
+                raise ValueError("unknown model {!r}".format(cfg["model"]))
+            lp.label_spec(cfg["label"])
+        except (Exception, SystemExit) as exc:
+            lp.load_config(self.cfg["printer"])   # put this printer's calibration back
+            self.printer_box.set(self.cfg["printer"])
+            self._set_status("can't use {}: {}".format(name, exc), "err")
+            return
         self._save_setting("printer", name, "the printer")
         text = self.text.get("1.0", "end-1c")
         self.alive = False
