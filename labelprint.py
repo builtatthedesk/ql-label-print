@@ -66,16 +66,38 @@ class StatusUnavailable(Exception):
 # config
 # --------------------------------------------------------------------------
 
-def load_config() -> dict:
+def load_config(printer: str | None = None) -> dict:
+    """config.json over DEFAULTS, then the chosen printer's profile over that.
+
+    An optional "printers" map holds one profile per printer (model,
+    transport, status_transport, label, calibration...); "printer" names the
+    default. `printer` picks another one for this run without saving it.
+    """
     cfg = dict(DEFAULTS)
     if CONFIG_PATH.exists():
         cfg.update(json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig")))
+    printers = cfg.get("printers") or {}
+    name = printer or cfg.get("printer")
+    if printers:
+        if name is None:
+            name = next(iter(printers))
+        if name not in printers:
+            raise SystemExit(f"unknown printer {name!r}; config.json has: "
+                             + ", ".join(printers))
+        cfg.update(printers[name])
+        cfg["printer"] = name
+    elif printer:
+        raise SystemExit(f"--printer {printer!r} given but config.json has no "
+                         "\"printers\" section")
     apply_calibration(cfg.get("calibration", {}))
     return cfg
 
 
 DOTS_PER_MM = 300 / 25.4
 TEXT_SHIFT_Y: dict[str, int] = {}  # label id -> dots to move text down
+
+
+_STOCK_LABELS = tuple(ALL_LABELS)
 
 
 def apply_calibration(cal: dict) -> None:
@@ -90,7 +112,10 @@ def apply_calibration(cal: dict) -> None:
     fixed, so text is instead nudged to sit centred on the label.
     """
     global ALL_LABELS
-    labels = list(ALL_LABELS)
+    # Always start from brother_ql's own sizes: this runs again whenever the
+    # GUI switches printer, and one printer's calibration is not another's.
+    labels = list(_STOCK_LABELS)
+    TEXT_SHIFT_Y.clear()
     for ident, c in cal.items():
         if ident.startswith("_"):
             continue
@@ -853,7 +878,10 @@ def send(data: bytes, transport: str) -> str:
 # --------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    cfg = load_config()
+    # --printer has to be known before the other defaults are filled in.
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--printer")
+    cfg = load_config(pre.parse_known_args()[0].printer)
 
     # Shared options live on a parent parser so they work on either side of
     # the subcommand -- `text "hi" --label 62` reads better than forcing every
@@ -862,6 +890,10 @@ def build_parser() -> argparse.ArgumentParser:
     # values, which would silently undo `--no-qr text hi`.
     def make_common() -> argparse.ArgumentParser:
         common = argparse.ArgumentParser(add_help=False)
+        common.add_argument("--printer", default=cfg.get("printer"),
+                            help="printer profile from config.json \"printers\" "
+                                 "(sets model, transport, roll...); flags still win"
+                                 + (": " + ", ".join(cfg["printers"]) if cfg.get("printers") else ""))
         common.add_argument("--model", default=cfg["model"])
         common.add_argument("--label", default=cfg["label"],
                             help="DK size id, e.g. 62, 62x29, 102x152")

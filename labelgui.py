@@ -56,7 +56,9 @@ def capitalize_words(text: str) -> str:
 class LabelApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
+        self.alive = True     # False once a printer switch has replaced this window's contents
         self.cfg = lp.load_config()
+        self.printers = list(self.cfg.get("printers") or {})
         self.model = [m for m in lp.ALL_MODELS
                       if m.identifier == self.cfg["model"]][0]
         self.min_len, self.max_len = self.model.min_max_length_dots
@@ -155,7 +157,13 @@ class LabelApp:
             raw = json.loads(lp.CONFIG_PATH.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             raw = {}
-        raw[key] = value
+        name = self.cfg.get("printer")
+        profile = (raw.get("printers") or {}).get(name)
+        # A roll is loaded in one printer, so it is saved with that printer.
+        if key == "label" and profile is not None:
+            profile[key] = value
+        else:
+            raw[key] = value
         try:
             lp.CONFIG_PATH.write_text(json.dumps(raw, indent=2) + "\n",
                                       encoding="utf-8")
@@ -187,8 +195,18 @@ class LabelApp:
         head.columnconfigure(0, weight=1)
         ttk.Label(head, text="Label text",
                   font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w")
-        ttk.Label(head, text=self.cfg["model"],
-                  foreground="#666").grid(row=0, column=1, sticky="e", padx=(0, 10))
+        if len(self.printers) > 1:
+            # Picking a printer saves it as the default (the CLI follows) and
+            # rebuilds the window for that printer's model and roll.
+            self.printer_box = ttk.Combobox(head, values=self.printers,
+                                            width=max(len(n) for n in self.printers) + 2,
+                                            state="readonly")
+            self.printer_box.set(self.cfg["printer"])
+            self.printer_box.grid(row=0, column=1, sticky="e", padx=(0, 10))
+            self.printer_box.bind("<<ComboboxSelected>>", self._on_printer_change)
+        else:
+            ttk.Label(head, text=self.cfg.get("printer") or self.cfg["model"],
+                      foreground="#666").grid(row=0, column=1, sticky="e", padx=(0, 10))
 
         # Changing this writes config.json, so the CLI
         # follow the roll too. Nothing here can ask the printer what is really
@@ -321,7 +339,41 @@ class LabelApp:
         text = self.text.get("1.0", "end-1c").strip()
         return capitalize_words(text) if self.cap_words.get() else text
 
+    def _on_printer_change(self, _event=None) -> None:
+        name = self.printer_box.get()
+        if name == self.cfg["printer"]:
+            return
+        if self.printing:
+            self.printer_box.set(self.cfg["printer"])
+            self._set_status("wait for the print to finish before switching", "err")
+            return
+        # Check the profile loads before saving it or tearing the window down:
+        # a bad model/roll would otherwise leave an empty window and a
+        # config.json the next launch dies on too.
+        try:
+            cfg = lp.load_config(name)
+            if cfg["model"] not in {m.identifier for m in lp.ALL_MODELS}:
+                raise ValueError("unknown model {!r}".format(cfg["model"]))
+            lp.label_spec(cfg["label"])
+        except (Exception, SystemExit) as exc:
+            lp.load_config(self.cfg["printer"])   # put this printer's calibration back
+            self.printer_box.set(self.cfg["printer"])
+            self._set_status("can't use {}: {}".format(name, exc), "err")
+            return
+        self._save_setting("printer", name, "the printer")
+        text = self.text.get("1.0", "end-1c")
+        self.alive = False
+        if self.render_job:
+            self.root.after_cancel(self.render_job)
+        for w in self.root.winfo_children():
+            w.destroy()
+        app = LabelApp(self.root)
+        app.text.insert("1.0", text)
+        app._set_status("now printing to " + name)
+
     def _schedule_render(self, _event=None) -> None:
+        if not self.alive:
+            return
         if self.render_job:
             self.root.after_cancel(self.render_job)
         self.render_job = self.root.after(DEBOUNCE_MS, self._render_preview)
@@ -496,6 +548,8 @@ class LabelApp:
 
     def _render_preview(self) -> None:
         self.render_job = None
+        if not self.alive:
+            return
         text = self._current_text()
         cw = self.canvas.winfo_width() or PREVIEW_W
         if not text:
@@ -637,6 +691,8 @@ class LabelApp:
             self.results.put(("err", detail, None, None))
 
     def _drain_results(self) -> None:
+        if not self.alive:
+            return
         try:
             while True:
                 kind, msg, text, date = self.results.get_nowait()

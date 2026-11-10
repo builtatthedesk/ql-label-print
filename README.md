@@ -189,6 +189,26 @@ Puts a **Print a label** shortcut on the Desktop (and Start menu), running
 - **Along the roll** turns the text 90° so a narrow roll makes a big label.
 - **Recent...** brings back a printed label with its settings (words, date, QR, Show date, shelf, layout) for a one-click reprint; copies go back to 1 and each reprint gets a new ID. Kept in `gui-history.json`. The Date box is a plain box; type a date or leave it blank for today.
 
+### More than one printer
+
+Give `config.json` a `"printers"` map, one profile per printer, and name the
+default in `"printer"`. A profile holds anything printer-specific (`model`,
+`transport`, `status_transport`, `label`, `calibration`) and overrides the
+top-level values:
+
+```json
+"printer": "Desk",
+"printers": {
+  "Desk":   { "model": "QL-1110NWB", "label": "29x90", "transport": "net://192.168.1.50" },
+  "Garage": { "model": "QL-820NWB",  "label": "62",    "transport": "net://192.168.1.51" }
+}
+```
+
+The desktop app then shows a printer dropdown; picking one saves it as the
+default and the roll is remembered per printer. On the command line,
+`--printer Garage` picks one for that run only. Without `"printers"`
+everything works as before.
+
 ## Transports
 
 | Transport | Notes |
